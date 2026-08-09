@@ -13,10 +13,10 @@ Serverless by design — no Music Assistant server, providers talk to services d
 | Audio v1 | just_audio + audio_service | lossless decode, shared-mode output |
 | Audio v2 | Rust cpal exclusive engine | true bit-perfect: WASAPI-exclusive / ALSA direct / CoreAudio hog / AAudio |
 | Qobuz | MA provider logic port (Dart) | Qobuz v0.2 API, subscriber credentials |
-| YTM search | dart_ytmusic_api (MusilyApp) | GPL-3.0 — reference only, reimplement if needed |
+| YTM search | pure-Dart WEB_REMIX search (lib/providers/ytm/search_client.dart) | visitor-data flow, songs param; ytmusicapi (MIT) as reference |
 | YTM streams | pure-Dart InnerTube port (lib/providers/ytm/innertube.dart) | client ladder ANDROID_MUSIC→VR→ANDROID→TESTSUITE; audios_resolver's Linux stub is unusable, so ported its Kotlin logic to Dart for all platforms |
-| Local | directory scan + metadata (mutagen-equivalent) | |
-| Library | SQLite (drift) | MusicBrainz ID keyed, source priority local > qobuz > ytm |
+| Local | metadata_god (FLAC via Vorbis, MP3 via ID3v2.4) | directory scan, recursive |
+| Library | LibraryService (merged search + source priority) | fuzzy key = title|artist; SQLite (drift) planned |
 
 ## Provider abstraction
 
@@ -49,8 +49,8 @@ Mixed-source queue supported.
 ## Milestones
 
 - [x] M0: YTM feasibility spike (search ✅, yt-dlp stream ✅, signatureCipher wall found)
-- [ ] M1: Flutter scaffold + provider interface + YTM search/play e2e (desktop)
-- [ ] M2: Local files provider + merged library (SQLite, MusicBrainz matching)
+- [x] M1: Flutter scaffold + provider interface + YTM search/play e2e (pure-Dart, spike PASS)
+- [x] M2: Local files provider + merged LibraryService (source priority + badges)
 - [ ] M3: Qobuz provider (auth, search, hi-res stream) — needs subscription credentials
 - [ ] M4: source selector + quality preference UI, mixed-source queue
 - [ ] M5: Rust cpal exclusive playback engine (desktop first)
@@ -61,7 +61,9 @@ Mixed-source queue supported.
 
 - music-assistant/server providers/qobuz + ytmusic (Apache-2.0)
 - ytmusicapi (MIT) — YTM web-client API reference
-- audios_resolver (MIT) — InnerTube stream resolution
+- audios_resolver (MIT) — InnerTube stream resolution reference (ported)
 - InnerTune/RiMusic (GPL) — Android-client API extraction reference
 - qbz (MIT, Rust) — bit-perfect Qobuz desktop reference
+- media_kit / libmpv — audio engine for bit-perfect evolution
+- metadata_god (FLAC Vorbis / MP3 ID3v2.4) — local metadata
 - cpal — exclusive audio backends

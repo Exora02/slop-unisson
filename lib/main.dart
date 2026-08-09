@@ -1,10 +1,16 @@
+import 'dart:io' show Directory;
+
 import 'package:flutter/material.dart';
 
 import 'core/models.dart';
 import 'core/player_service.dart';
+import 'core/provider.dart';
+import 'core/library_service.dart';
+import 'providers/local/local_provider.dart';
 import 'providers/ytm/ytm_provider.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const UnisonApp());
 }
 
@@ -33,18 +39,39 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final _ytm = YtmProvider();
+  late final List<MusicProvider> _providers;
+  late final LibraryService _library;
   final _player = PlayerService();
   final _controller = TextEditingController();
+  final _localRoot = 'PATH_TO_LOCAL_MUSIC_ROOT'; // user-configurable later
 
-  List<Track> _results = [];
+  late final YtmProvider _ytm;
+  late final LocalProvider? _local;
+
+  List<MergedTrack> _results = [];
   bool _searching = false;
   String? _error;
-  Track? _resolving;
+  MergedTrack? _resolving;
+  String? _playingSource;
+
+  @override
+  void initState() {
+    super.initState();
+    _ytm = YtmProvider();
+    _local = _localRoot == 'PATH_TO_LOCAL_MUSIC_ROOT'
+        ? null
+        : LocalProvider([Directory(_localRoot)]);
+    _providers = [
+      if (_local != null) _local,
+      _ytm,
+    ];
+    _library = LibraryService(_providers);
+  }
 
   @override
   void dispose() {
     _ytm.dispose();
+    _local?.dispose();
     _player.dispose();
     _controller.dispose();
     super.dispose();
@@ -58,8 +85,8 @@ class _HomeScreenState extends State<HomeScreen> {
       _error = null;
     });
     try {
-      final r = await _ytm.search(q);
-      setState(() => _results = r.tracks);
+      final r = await _library.searchAll(q);
+      setState(() => _results = r);
     } catch (e) {
       setState(() => _error = '$e');
     } finally {
@@ -67,11 +94,25 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _play(Track t) async {
-    setState(() => _resolving = t);
+  Future<void> _play(MergedTrack t, {String? sourceId}) async {
+    final src = sourceId ?? t.bestSourceId;
+    setState(() {
+      _resolving = t;
+      _playingSource = src;
+    });
     try {
-      final spec = await _ytm.resolveStream(t, QualityPref.highest);
-      await _player.play(t, spec);
+      final rr = sourceId != null
+          ? await _library.resolve(t, sourceId, QualityPref.highest)
+          : await _library.resolveAuto(t, QualityPref.highest);
+      await _player.play(
+        Track(
+          providerId: src,
+          id: rr.stream.uri.toString(),
+          title: rr.title,
+          artists: rr.artists,
+        ),
+        rr.stream,
+      );
     } catch (e) {
       setState(() => _error = 'Play failed: $e');
     } finally {
@@ -81,7 +122,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final playing = _player.current;
+    final primary = Theme.of(context).colorScheme.primary;
     return Scaffold(
       appBar: AppBar(
         title: Row(
@@ -89,8 +130,14 @@ class _HomeScreenState extends State<HomeScreen> {
             const Icon(Icons.album_rounded),
             const SizedBox(width: 10),
             const Text('Unison'),
-            const SizedBox(width: 8),
-            Chip(label: Text(_ytm.id.toUpperCase())),
+            const SizedBox(width: 12),
+            ..._providers.map((p) => Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: Chip(
+                    label: Text(p.id),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                )),
           ],
         ),
       ),
@@ -104,7 +151,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: TextField(
                     controller: _controller,
                     decoration: const InputDecoration(
-                      hintText: 'Search YouTube Music...',
+                      hintText: 'Search all sources...',
                       prefixIcon: Icon(Icons.search),
                       border: OutlineInputBorder(),
                     ),
@@ -139,8 +186,16 @@ class _HomeScreenState extends State<HomeScreen> {
                     itemCount: _results.length,
                     itemBuilder: (context, i) {
                       final t = _results[i];
-                      final isCurrent = _player.current?.id == t.id;
-                      final isResolving = _resolving?.id == t.id;
+                      final isCurrent = _player.current?.title == t.title;
+                      final isResolving = _resolving?.universalKey == t.universalKey;
+                      final badgeSources = t.sources.keys.toList()..sort((a, b) {
+                        const order = ['local', 'qobuz', 'ytm'];
+                        int rank(String s) {
+                          final i = order.indexOf(s);
+                          return i == -1 ? order.length : i;
+                        }
+                        return rank(a).compareTo(rank(b));
+                      });
                       return ListTile(
                         leading: ClipRRect(
                           borderRadius: BorderRadius.circular(6),
@@ -155,15 +210,26 @@ class _HomeScreenState extends State<HomeScreen> {
                                 )
                               : const Icon(Icons.music_note),
                         ),
-                        title: Text(
-                          t.title,
-                          maxLines: 1,
-                          style: isCurrent
-                              ? TextStyle(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .primary)
-                              : null,
+                        title: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                t.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: isCurrent
+                                    ? TextStyle(color: primary)
+                                    : null,
+                              ),
+                            ),
+                            ...badgeSources.map((s) => Padding(
+                                  padding: const EdgeInsets.only(left: 4),
+                                  child: _SourceBadge(
+                                    source: s,
+                                    isActive: s == _playingSource,
+                                  ),
+                                )),
+                          ],
                         ),
                         subtitle: Text(
                           '${t.artists.join(', ')}${t.album != null ? ' — ${t.album}' : ''}',
@@ -174,40 +240,94 @@ class _HomeScreenState extends State<HomeScreen> {
                             ? const SizedBox(
                                 width: 20,
                                 height: 20,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2),
+                                child: CircularProgressIndicator(strokeWidth: 2),
                               )
-                            : isCurrent
-                                ? Icon(
-                                    _player.playing
-                                        ? Icons.pause_circle
-                                        : Icons.play_circle,
-                                    color:
-                                        Theme.of(context).colorScheme.primary,
-                                  )
-                                : const Icon(Icons.play_arrow_rounded),
-                        onTap: isCurrent ? () => _player.toggle() : () => _play(t),
+                            : PopupMenuButton<String>(
+                                icon: const Icon(Icons.source_rounded),
+                                tooltip: 'Choose source',
+                                onSelected: (src) => _play(t, sourceId: src),
+                                itemBuilder: (context) => [
+                                  for (final s in badgeSources)
+                                    PopupMenuItem(
+                                      value: s,
+                                      child: Text('Play from $s'),
+                                    ),
+                                ],
+                              ),
+                        onTap: isCurrent
+                            ? () => _player.toggle()
+                            : () => _play(t),
                       );
                     },
                   ),
           ),
         ],
       ),
-      bottomNavigationBar: playing == null
+      bottomNavigationBar: _player.current == null
           ? null
           : NowPlayingBar(
-              track: playing,
+              title: _player.current!.title,
+              artists: _player.current!.artists,
               player: _player,
             ),
     );
   }
 }
 
+class _SourceBadge extends StatelessWidget {
+  final String source;
+  final bool isActive;
+
+  const _SourceBadge({required this.source, required this.isActive});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = switch (source) {
+      'local' => Colors.green.shade600,
+      'qobuz' => const Color(0xFF0FA88E),
+      'ytm' => Colors.red.shade700,
+      _ => Colors.blueGrey,
+    };
+    return Tooltip(
+      message: subbed('$source'),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: isActive ? color.withValues(alpha: 0.3) : color.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: color, width: isActive ? 1.5 : 0.8),
+        ),
+        child: Text(
+          source,
+          style: TextStyle(
+            fontSize: 10,
+            color: isActive ? Colors.white : color.withValues(alpha: 0.9),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+
+  String subbed(String s) => switch (s) {
+        'local' => 'Local files',
+        'qobuz' => 'Qobuz hi-res',
+        'ytm' => 'YouTube Music',
+        _ => s,
+      };
+}
+
 class NowPlayingBar extends StatelessWidget {
-  final Track track;
+  final String title;
+  final List<String> artists;
   final PlayerService player;
 
-  const NowPlayingBar({super.key, required this.track, required this.player});
+  const NowPlayingBar({
+    super.key,
+    required this.title,
+    required this.artists,
+    required this.player,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -226,10 +346,11 @@ class NowPlayingBar extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(track.title, maxLines: 1),
+                Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
                 Text(
-                  track.artists.join(', '),
+                  artists.join(', '),
                   maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
