@@ -1,12 +1,15 @@
 import 'dart:io' show Directory;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'core/models.dart';
 import 'core/player_service.dart';
 import 'core/provider.dart';
 import 'core/library_service.dart';
 import 'providers/local/local_provider.dart';
+import 'providers/qobuz/qobuz_provider.dart';
+import 'providers/qobuz/qobuz_login_screen.dart';
 import 'providers/ytm/ytm_provider.dart';
 
 void main() async {
@@ -44,9 +47,11 @@ class _HomeScreenState extends State<HomeScreen> {
   final _player = PlayerService();
   final _controller = TextEditingController();
   final _localRoot = 'PATH_TO_LOCAL_MUSIC_ROOT'; // user-configurable later
+  final _secure = const FlutterSecureStorage();
 
   late final YtmProvider _ytm;
   late final LocalProvider? _local;
+  late final QobuzProvider _qobuz;
 
   List<MergedTrack> _results = [];
   bool _searching = false;
@@ -61,8 +66,15 @@ class _HomeScreenState extends State<HomeScreen> {
     _local = _localRoot == 'PATH_TO_LOCAL_MUSIC_ROOT'
         ? null
         : LocalProvider([Directory(_localRoot)]);
+    _qobuz = QobuzProvider(
+      loadToken: () => _secure.read(key: 'qobuz_token'),
+      saveToken: (t) => _secure.write(key: 'qobuz_token', value: t),
+      clearToken: () => _secure.delete(key: 'qobuz_token'),
+    );
+    _qobuz.restoreSession();
     _providers = [
       if (_local != null) _local,
+      _qobuz,
       _ytm,
     ];
     _library = LibraryService(_providers);
@@ -72,9 +84,22 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _ytm.dispose();
     _local?.dispose();
+    _qobuz.dispose();
     _player.dispose();
     _controller.dispose();
     super.dispose();
+  }
+
+  Future<void> _connectQobuz() async {
+    final ok = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => QobuzLoginScreen(provider: _qobuz)),
+    );
+    if (ok == true && mounted) setState(() {});
+  }
+
+  Future<void> _disconnectQobuz() async {
+    await _qobuz.logout();
+    if (mounted) setState(() {});
   }
 
   Future<void> _search() async {
@@ -140,6 +165,37 @@ class _HomeScreenState extends State<HomeScreen> {
                 )),
           ],
         ),
+        actions: [
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.settings_rounded),
+            tooltip: 'Sources & settings',
+            onSelected: (value) {
+              if (value == 'qobuz_login') _connectQobuz();
+              if (value == 'qobuz_logout') _disconnectQobuz();
+            },
+            itemBuilder: (context) => [
+              if (!_qobuz.isConfigured)
+                const PopupMenuItem(
+                  value: 'qobuz_login',
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.login, color: Color(0xFF0FA88E)),
+                    title: Text('Connect Qobuz'),
+                    subtitle: Text('hi-res stream'),
+                  ),
+                )
+              else
+                const PopupMenuItem(
+                  value: 'qobuz_logout',
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.logout, color: Colors.red),
+                    title: Text('Disconnect Qobuz'),
+                  ),
+                ),
+            ],
+          ),
+        ],
       ),
       body: Column(
         children: [
