@@ -58,6 +58,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _error;
   MergedTrack? _resolving;
   String? _playingSource;
+  QualityPref _quality = QualityPref.highest;
 
   @override
   void initState() {
@@ -127,8 +128,8 @@ class _HomeScreenState extends State<HomeScreen> {
     });
     try {
       final rr = sourceId != null
-          ? await _library.resolve(t, sourceId, QualityPref.highest)
-          : await _library.resolveAuto(t, QualityPref.highest);
+          ? await _library.resolve(t, sourceId, _quality)
+          : await _library.resolveAuto(t, _quality);
       await _player.play(
         Track(
           providerId: src,
@@ -172,6 +173,9 @@ class _HomeScreenState extends State<HomeScreen> {
             onSelected: (value) {
               if (value == 'qobuz_login') _connectQobuz();
               if (value == 'qobuz_logout') _disconnectQobuz();
+              if (value == 'quality_highest') setState(() => _quality = QualityPref.highest);
+              if (value == 'quality_balanced') setState(() => _quality = QualityPref.balanced);
+              if (value == 'quality_lowest') setState(() => _quality = QualityPref.lowest);
             },
             itemBuilder: (context) => [
               if (!_qobuz.isConfigured)
@@ -193,6 +197,30 @@ class _HomeScreenState extends State<HomeScreen> {
                     title: Text('Disconnect Qobuz'),
                   ),
                 ),
+              const PopupMenuDivider(),
+              const PopupMenuItem(
+                enabled: false,
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16),
+                  child: Text('Playback quality',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ),
+              CheckedPopupMenuItem(
+                value: 'quality_highest',
+                checked: _quality == QualityPref.highest,
+                child: const Text('Hi-res / lossless (highest)'),
+              ),
+              CheckedPopupMenuItem(
+                value: 'quality_balanced',
+                checked: _quality == QualityPref.balanced,
+                child: const Text('Balanced'),
+              ),
+              CheckedPopupMenuItem(
+                value: 'quality_lowest',
+                checked: _quality == QualityPref.lowest,
+                child: const Text('Lowest data (save data)'),
+              ),
             ],
           ),
         ],
