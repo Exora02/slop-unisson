@@ -133,11 +133,16 @@ class QobuzApi {
     }
 
     if (signRequest) {
-      // build signing_data: endpoint (no slashes) + sorted params
-      final parts = endpoint.split('/');
-      final signingData = StringBuffer(parts.join());
+      // Match MA: signature covers endpoint + the ORIGINAL sorted params
+      // (format_id, track_id, intent) — NOT app_id/user_auth_token/request_ts,
+      // which are appended to the query AFTER signing.
+      final signingData = StringBuffer(endpoint.split('/').join());
       final keys = query.keys.toList()..sort();
       for (final k in keys) {
+        if (k == 'app_id' || k == 'user_auth_token' ||
+            k == 'request_ts' || k == 'request_sig') {
+          continue; // these are appended post-signature, not signed
+        }
         signingData.write('$k${query[k]}');
       }
       final ts = (DateTime.now().millisecondsSinceEpoch / 1000).toStringAsFixed(0);
