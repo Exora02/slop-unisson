@@ -50,33 +50,40 @@ class QobuzTrack {
   });
 
   factory QobuzTrack.fromJson(Map<String, dynamic> j) {
-    final performer = j['performer'] as Map<String, dynamic>?;
-    final albumObj = j['album'] as Map<String, dynamic>?;
-    final albumArtist = albumObj?['artist'] as Map<String, dynamic>?;
-    final artistName = performer?['name'] ?? albumArtist?['name'];
-    final image = j['image'] as Map<String, dynamic>?;
-    Object? artUrl;
-    if (image != null) {
-      for (final k in ['large', 'medium', 'small']) {
-        if (image[k] != null) {
-          artUrl = image[k];
-          break;
+    try {
+      final performer = j['performer'] as Map<String, dynamic>?;
+      final albumObj = j['album'] as Map<String, dynamic>?;
+      final albumArtist = albumObj?['artist'] as Map<String, dynamic>?;
+      final artistName = performer?['name'] ?? albumArtist?['name'];
+      final image = j['image'] as Map<String, dynamic>?;
+      Object? artUrl;
+      if (image != null) {
+        for (final k in ['large', 'medium', 'small']) {
+          if (image[k] != null) {
+            artUrl = image[k];
+            break;
+          }
         }
       }
+      final id = j['id'];
+      final title = j['title'];
+      return QobuzTrack(
+        id: id?.toString() ?? '',
+        title: title?.toString() ?? 'Unknown',
+        artists: artistName != null ? [artistName.toString()] : const [],
+        album: albumObj?['title']?.toString(),
+        duration: (j['duration'] as num?)?.toInt(),
+        artwork: artUrl?.toString(),
+        maxSampleRate: (j['maximum_sampling_rate'] as num?)?.toInt(),
+        maxBitDepth: (j['maximum_bit_depth'] as num?)?.toInt(),
+        streamable: (j['streamable'] as bool?) ?? false,
+      );
+    } on TypeError catch (e) {
+      // A field-type mismatch must never break the whole search. Report the
+      // field so we can fix the exact key.
+      throw Exception('Qobuz track field-type mismatch: $e '
+          '(title=${j['title']}, keys=${j.keys.toList().take(6)})');
     }
-    final id = j['id'];
-    final title = j['title'];
-    return QobuzTrack(
-      id: id?.toString() ?? '',
-      title: title?.toString() ?? 'Unknown',
-      artists: artistName != null ? [artistName.toString()] : const [],
-      album: albumObj?['title']?.toString(),
-      duration: (j['duration'] as num?)?.toInt(),
-      artwork: artUrl?.toString(),
-      maxSampleRate: (j['maximum_sampling_rate'] as num?)?.toInt(),
-      maxBitDepth: (j['maximum_bit_depth'] as num?)?.toInt(),
-      streamable: (j['streamable'] as bool?) ?? false,
-    );
   }
 }
 
@@ -114,11 +121,22 @@ class QobuzApi {
       final body = resp.body.replaceAll('\n', ' ');
       throw Exception('Qobuz login failed (${resp.statusCode}): $body');
     }
-    final j = jsonDecode(resp.body) as Map<String, dynamic>;
+    final Map<String, dynamic> j;
+    try {
+      j = jsonDecode(resp.body) as Map<String, dynamic>;
+    } catch (e) {
+      throw Exception('Qobuz login: bad response body ($e)');
+    }
     if (j['user_auth_token'] == null) {
       throw Exception('Invalid Qobuz credentials');
     }
-    final auth = QobuzAuthInfo.fromJson(j);
+    final QobuzAuthInfo auth;
+    try {
+      auth = QobuzAuthInfo.fromJson(j);
+    } on TypeError catch (e) {
+      throw Exception('Qobuz login field-type mismatch: $e '
+          '(keys=${j.keys.toList().take(8)})');
+    }
     _cachedToken = auth.token;
     return auth;
   }
