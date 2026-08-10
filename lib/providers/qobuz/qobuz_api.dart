@@ -55,7 +55,7 @@ class QobuzTrack {
     final albumArtist = albumObj?['artist'] as Map<String, dynamic>?;
     final artistName = performer?['name'] ?? albumArtist?['name'];
     final image = j['image'] as Map<String, dynamic>?;
-    var artUrl;
+    Object? artUrl;
     if (image != null) {
       for (final k in ['large', 'medium', 'small']) {
         if (image[k] != null) {
@@ -64,13 +64,15 @@ class QobuzTrack {
         }
       }
     }
+    final id = j['id'];
+    final title = j['title'];
     return QobuzTrack(
-      id: j['id'].toString(),
-      title: j['title'] as String,
-      artists: artistName != null ? [artistName as String] : const [],
-      album: albumObj?['title'] as String?,
+      id: id?.toString() ?? '',
+      title: title?.toString() ?? 'Unknown',
+      artists: artistName != null ? [artistName.toString()] : const [],
+      album: albumObj?['title']?.toString(),
       duration: (j['duration'] as num?)?.toInt(),
-      artwork: artUrl as String?,
+      artwork: artUrl?.toString(),
       maxSampleRate: (j['maximum_sampling_rate'] as num?)?.toInt(),
       maxBitDepth: (j['maximum_bit_depth'] as num?)?.toInt(),
       streamable: (j['streamable'] as bool?) ?? false,
@@ -178,10 +180,17 @@ class QobuzApi {
       'type': 'tracks',
     });
     final items = (j['tracks']?['items'] as List<dynamic>?) ?? [];
-    return items
-        .map((e) => QobuzTrack.fromJson(e as Map<String, dynamic>))
-        .where((t) => t.streamable)
-        .toList();
+    final out = <QobuzTrack>[];
+    for (final e in items) {
+      try {
+        final t = QobuzTrack.fromJson(e as Map<String, dynamic>);
+        if (t.id.isEmpty) continue;
+        out.add(t);
+      } catch (_) {
+        // skip malformed track(s) instead of failing the whole search
+      }
+    }
+    return out.where((t) => t.streamable).toList();
   }
 
   /// Resolve the direct stream URL for a track.

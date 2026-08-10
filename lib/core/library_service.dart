@@ -44,22 +44,33 @@ class LibraryService {
   LibraryService(this.providers);
 
   /// Merged, source-annotated search across all providers.
+  /// Each provider is isolated: one failing provider never hides others'
+  /// results.
   Future<List<MergedTrack>> searchAll(String query) async {
-    final futures = <Future<SearchResults>>[];
-    final ids = <String>[];
+    final tasks = <({String id, Future<SearchResults> future})>[];
 
     for (final p in providers) {
       if (!p.isConfigured) continue;
-      ids.add(p.id);
-      futures.add(p.search(query));
+      tasks.add((id: p.id, future: p.search(query)));
     }
 
-    final results = await Future.wait(futures);
+    // await all, but tolerate per-provider failures
+    final results = <({String id, List<Track> tracks})>[];
+    for (final task in tasks) {
+      try {
+        final r = await task.future;
+        results.add((id: task.id, tracks: r.tracks));
+      } catch (_) {
+        // a provider's search error must not hide other sources
+        results.add((id: task.id, tracks: const []));
+      }
+    }
+
     final all = <MergedTrack>[];
     final byKey = <String, MergedTrack>{};
 
-    for (var i = 0; i < ids.length; i++) {
-      for (final t in results[i].tracks) {
+    for (final result in results) {
+      for (final t in result.tracks) {
         final key = _keyFor(t);
         final existing = byKey[key];
         if (existing == null) {
