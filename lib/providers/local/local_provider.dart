@@ -1,10 +1,10 @@
 import 'dart:io';
 
-import 'package:metadata_god/metadata_god.dart';
 import 'package:path/path.dart' as p;
 
 import '../../core/models.dart';
 import '../../core/provider.dart';
+import 'tag_reader.dart';
 
 const _audioExts = {'mp3', 'flac', 'm4a', 'aac', 'ogg', 'wav', 'opus'};
 
@@ -55,18 +55,25 @@ class LocalProvider implements MusicProvider {
 
   Future<Track?> _readTrack(File file) async {
     try {
-      final md = await MetadataGod.readMetadata(file: file.path);
-      final title = md.title?.trim().isNotEmpty == true
-          ? md.title!.trim()
+      final tags = await TagReader.read(file.path);
+      final title = tags.title?.trim().isNotEmpty == true
+          ? tags.title!.trim()
           : p.basenameWithoutExtension(file.path);
-      final artists = (md.artist?.split(',').map((a) => a.trim()).where((a) => a.isNotEmpty).toList() ?? const <String>[]);
+      final artists = tags.artist == null
+          ? <String>[]
+          : tags.artist!
+              .split('/')
+              .expand((a) => a.split(','))
+              .map((a) => a.trim())
+              .where((a) => a.isNotEmpty)
+              .toList();
       return Track(
         providerId: id,
         id: 'file:${file.path}',
         title: title,
         artists: artists,
-        album: md.album?.trim().isNotEmpty == true ? md.album : null,
-        duration: md.duration,
+        album: tags.album?.trim().isNotEmpty == true ? tags.album : null,
+        duration: tags.duration,
         artwork: null,
       );
     } catch (_) {
