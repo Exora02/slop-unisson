@@ -187,9 +187,9 @@ class InnerTubeClient {
       return null;
     }
 
-    final formats =
-        (j['streamingData']?['adaptiveFormats'] as List<dynamic>? ?? [])
-            .cast<Map<String, dynamic>>();
+    final formats = (j['streamingData']?['adaptiveFormats'] as List<dynamic>? ?? [])
+        .whereType<Map<String, dynamic>>()
+        .toList();
     final audio = formats.where((f) {
       final mime = f['mimeType'] as String? ?? '';
       final url = f['url'] as String?;
@@ -205,7 +205,7 @@ class InnerTubeClient {
       if (best != null) break;
     }
     best ??= audio.reduce(
-        (a, b) => (a['bitrate'] as int? ?? 0) >= (b['bitrate'] as int? ?? 0) ? a : b);
+        (a, b) => (a['bitrate'] as num? ?? 0) >= (b['bitrate'] as num? ?? 0) ? a : b);
 
     final url = best['url'] as String;
     final u = Uri.tryParse(url);
@@ -218,10 +218,10 @@ class InnerTubeClient {
     final codecMatch = RegExp('codecs="([^"]+)"').firstMatch(mime);
     return ResolvedStream(
       url: url,
-      itag: best['itag'] as int? ?? 0,
+      itag: (best['itag'] as num?)?.toInt() ?? 0,
       contentType: mime,
       codec: codecMatch?.group(1) ?? 'unknown',
-      bitrate: best['bitrate'] as int? ?? 0,
+      bitrate: (best['bitrate'] as num?)?.toInt() ?? 0,
       contentLength: int.tryParse('${best['contentLength'] ?? ''}'),
       clientUsed: c.name,
       expiresAt: _parseExpiry(url),
