@@ -7,9 +7,9 @@ plugins {
 android {
     namespace = "com.example.unison"
     compileSdk = flutter.compileSdkVersion
-    // Pin to NDK 27 (pre-installed, complete) instead of Flutter's default
-    // 28 so the build doesn't stall downloading a second NDK.
-    ndkVersion = "27.0.12077973"
+    // Align to the NDK version the plugins expect (Flutter default 28).
+    // NDK 28.2.13676358 is installed at the Android SDK.
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

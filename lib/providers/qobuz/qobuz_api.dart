@@ -69,10 +69,10 @@ class QobuzTrack {
       title: j['title'] as String,
       artists: artistName != null ? [artistName as String] : const [],
       album: albumObj?['title'] as String?,
-      duration: j['duration'] as int?,
+      duration: (j['duration'] as num?)?.toInt(),
       artwork: artUrl as String?,
-      maxSampleRate: j['maximum_sampling_rate'] as int?,
-      maxBitDepth: j['maximum_bit_depth'] as int?,
+      maxSampleRate: (j['maximum_sampling_rate'] as num?)?.toInt(),
+      maxBitDepth: (j['maximum_bit_depth'] as num?)?.toInt(),
       streamable: (j['streamable'] as bool?) ?? false,
     );
   }
@@ -200,11 +200,11 @@ class QobuzApi {
     if (url == null) throw Exception('Qobuz returned no stream URL');
     return QobuzStream(
       url: url,
-      formatId: (j['format_id'] as int?) ?? formatId,
+      formatId: (j['format_id'] as num?)?.toInt() ?? formatId,
       mimeType: j['mime_type'] as String? ?? 'audio/flac',
       sampleRate: (j['sampling_rate'] as num?)?.toDouble(),
-      bitDepth: j['bit_depth'] as int?,
-      duration: j['duration'] as int?,
+      bitDepth: (j['bit_depth'] as num?)?.toInt(),
+      duration: (j['duration'] as num?)?.toInt(),
     );
   }
 
