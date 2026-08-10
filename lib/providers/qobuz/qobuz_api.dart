@@ -92,18 +92,25 @@ class QobuzApi {
 
   void setToken(String? t) => _cachedToken = t;
 
-  /// Login with email/password. Returns auth info on success, throws on failure.
-  Future<QobuzAuthInfo> login(String email, String password) async {
+  /// Login with username/password. Returns auth info on success, throws on failure.
+  /// Matches Music Assistant's spec: username + password + device_manufacturer_id
+  /// as query params, X-App-Id header only.
+  Future<QobuzAuthInfo> login(String username, String password) async {
     final resp = await _http.get(
       Uri.parse('$_baseUrl/user/login').replace(queryParameters: {
-        'email': email,
+        'username': username,
         'password': password,
-        'app_id': _appId,
+        'device_manufacturer_id': 'music_assistant',
       }),
-      headers: {'X-App-Id': _appId},
+      headers: {
+        'X-App-Id': _appId,
+        'User-Agent':
+            'Mozilla/5.0 (Linux; Android 13; app) AppleWebKit/537.36',
+      },
     );
     if (resp.statusCode != 200) {
-      throw Exception('Qobuz login failed (${resp.statusCode})');
+      final body = resp.body.replaceAll('\n', ' ');
+      throw Exception('Qobuz login failed (${resp.statusCode}): $body');
     }
     final j = jsonDecode(resp.body) as Map<String, dynamic>;
     if (j['user_auth_token'] == null) {
