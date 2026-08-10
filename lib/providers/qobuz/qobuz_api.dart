@@ -205,16 +205,21 @@ class QobuzApi {
       },
       signRequest: true,
     );
-    final url = j['url'] as String?;
-    if (url == null) throw Exception('Qobuz returned no stream URL');
-    return QobuzStream(
-      url: url,
-      formatId: (j['format_id'] as num?)?.toInt() ?? formatId,
-      mimeType: j['mime_type'] as String? ?? 'audio/flac',
-      sampleRate: (j['sampling_rate'] as num?)?.toDouble(),
-      bitDepth: (j['bit_depth'] as num?)?.toInt(),
-      duration: (j['duration'] as num?)?.toInt(),
-    );
+    try {
+      final url = j['url'] as String?;
+      if (url == null) throw Exception('Qobuz returned no stream URL');
+      return QobuzStream(
+        url: url,
+        formatId: (j['format_id'] as num?)?.toInt() ?? formatId,
+        mimeType: j['mime_type'] as String? ?? 'audio/flac',
+        sampleRate: (j['sampling_rate'] as num?)?.toDouble(),
+        bitDepth: (j['bit_depth'] as num?)?.toInt(),
+        duration: (j['duration'] as num?)?.toInt(),
+      );
+    } on TypeError catch (e) {
+      throw Exception('Qobuz getFileUrl field-type mismatch: $e '
+          '(keys=${j.keys.toList().take(8)})');
+    }
   }
 
   void dispose() {
