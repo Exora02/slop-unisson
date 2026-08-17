@@ -20,9 +20,12 @@ class _Client {
   final String? playerParams;
   final bool skipVisitorData;
 
+  /// TV clients use a leaner context (no androidSdkVersion/os fields).
+  final bool tv;
+
   const _Client(this.name, this.code, this.version, this.key, this.sdk,
       this.userAgent,
-      {this.playerParams, this.skipVisitorData = false});
+      {this.playerParams, this.skipVisitorData = false, this.tv = false});
 }
 
 const _clients = [
@@ -51,6 +54,16 @@ const _clients = [
       playerParams: 'CgIQBg'),
   _Client('ANDROID_TESTSUITE', '30', '1.9', _androidKey, 33,
       'com.google.android.youtube/1.9 (Linux; U; Android 13; en_US) gzip'),
+  // TV clients often escape the bot wall that hits ANDROID_* from
+  // datacenter IPs.
+  _Client(
+      'TVHTML5_SIMPLY_EMBEDDED_PLAYER',
+      '85',
+      '2.0',
+      _androidKey,
+      0,
+      'Mozilla/5.0 (PlayStation; PlayStation 4/12.00) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0 Safari/605.1.15',
+      tv: true),
 ];
 
 const _preferredItags = [251, 250, 140];
@@ -84,19 +97,40 @@ class InnerTubeClient {
   final _cache = <String, ResolvedStream>{};
   String? _visitorData;
 
+  /// Diagnostic trace of the most recent resolve attempt, one line per
+  /// client. Surfaced when resolution fails so we know WHY.
+  final List<String> lastAttemptTrace = [];
+
   Future<ResolvedStream?> resolve(String videoId, {bool force = false}) async {
     if (force) _cache.remove(videoId);
     final hit = _cache[videoId];
     if (hit != null && !hit.isExpired) return hit;
 
+    lastAttemptTrace.clear();
     await _ensureVisitorData();
+    var r = await _tryLadder(videoId);
+    if (r != null) {
+      _cache[videoId] = r;
+      return r;
+    }
+    // Second attempt: visitor data may be stale or a client may have
+    // throttled us — refresh it and run the ladder again. This is what
+    // made manual retries succeed; now it happens automatically.
+    _visitorData = null;
+    await _ensureVisitorData();
+    r = await _tryLadder(videoId);
+    if (r != null) {
+      _cache[videoId] = r;
+      return r;
+    }
+    return null;
+  }
+
+  Future<ResolvedStream?> _tryLadder(String videoId) async {
     for (final c in _clients) {
       try {
         final r = await _playerCall(videoId, c);
-        if (r != null) {
-          _cache[videoId] = r;
-          return r;
-        }
+        if (r != null) return r;
       } catch (_) {}
     }
     return null;
@@ -140,27 +174,35 @@ class InnerTubeClient {
   }
 
   Future<ResolvedStream?> _playerCall(String videoId, _Client c) async {
-    final ctx = <String, dynamic>{
-      'clientName': c.name,
-      'clientVersion': c.version,
-      'androidSdkVersion': c.sdk,
-      'osName': 'Android',
-      'osVersion': c.sdk >= 33 ? '13' : '11',
-      'platform': 'MOBILE',
-      'hl': 'en',
-      'gl': 'US',
-      'utcOffsetMinutes': 0,
-    };
-    if (!c.skipVisitorData && _visitorData != null) {
+    final ctx = c.tv
+        ? <String, dynamic>{
+            'clientName': c.name,
+            'clientVersion': c.version,
+            'hl': 'en',
+            'gl': 'US',
+          }
+        : <String, dynamic>{
+            'clientName': c.name,
+            'clientVersion': c.version,
+            'androidSdkVersion': c.sdk,
+            'osName': 'Android',
+            'osVersion': c.sdk >= 33 ? '13' : '11',
+            'platform': 'MOBILE',
+            'hl': 'en',
+            'gl': 'US',
+            'utcOffsetMinutes': 0,
+          };
+    if (!c.skipVisitorData && !c.tv && _visitorData != null) {
       ctx['visitorData'] = _visitorData;
     }
     final body = <String, dynamic>{
       'videoId': videoId,
       if (c.playerParams != null) 'params': c.playerParams,
       'context': {'client': ctx},
-      'playbackContext': {
-        'contentPlaybackContext': {'html5Preference': 'HTML5_PREF_WANTS'}
-      },
+      if (!c.tv)
+        'playbackContext': {
+          'contentPlaybackContext': {'html5Preference': 'HTML5_PREF_WANTS'}
+        },
       'contentCheckOk': true,
       'racyCheckOk': true,
     };
@@ -178,11 +220,20 @@ class InnerTubeClient {
           body: jsonEncode(body),
         )
         .timeout(const Duration(seconds: 20));
-    if (resp.statusCode != 200) return null;
+    if (resp.statusCode != 200) {
+      final snippet = resp.body.length > 160
+          ? resp.body.substring(0, 160)
+          : resp.body;
+      lastAttemptTrace.add(
+          '${c.name}: HTTP ${resp.statusCode} ${snippet.replaceAll('\n', ' ')}');
+      return null;
+    }
 
     final j = jsonDecode(resp.body) as Map<String, dynamic>;
     final status = j['playabilityStatus']?['status'] as String? ?? '';
     if (status != 'OK') {
+      final reason = j['playabilityStatus']?['reason'] as String? ?? '';
+      lastAttemptTrace.add('${c.name}: status=$status${reason.isEmpty ? '' : ' ($reason)'}');
       if (status == 'LOGIN_REQUIRED') _visitorData = null;
       return null;
     }
@@ -197,7 +248,10 @@ class InnerTubeClient {
           f.containsKey('signatureCipher') || f.containsKey('cipher');
       return mime.startsWith('audio/') && url != null && url.isNotEmpty && !hasCipher;
     }).toList();
-    if (audio.isEmpty) return null;
+    if (audio.isEmpty) {
+      lastAttemptTrace.add('${c.name}: OK but no direct-url audio formats');
+      return null;
+    }
 
     Map<String, dynamic>? best;
     for (final itag in _preferredItags) {
@@ -212,7 +266,10 @@ class InnerTubeClient {
     final ok = u != null &&
         (u.host.contains('googlevideo.com')) &&
         url.contains('expire=');
-    if (!ok) return null;
+    if (!ok) {
+      lastAttemptTrace.add('${c.name}: stream URL failed validation');
+      return null;
+    }
 
     final mime = best['mimeType'] as String? ?? '';
     final codecMatch = RegExp('codecs="([^"]+)"').firstMatch(mime);

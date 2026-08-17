@@ -37,7 +37,10 @@ class YtmProvider implements MusicProvider {
   Future<StreamSpec> resolveStream(Track track, QualityPref pref) async {
     final r = await _streams.resolve(track.id);
     if (r == null) {
-      throw StateError('YTM: no stream resolved for ${track.id}');
+      final trace = _streams.lastAttemptTrace.isEmpty
+          ? 'no client attempted'
+          : _streams.lastAttemptTrace.join(' | ');
+      throw StateError('YTM: no stream resolved for ${track.id} ($trace)');
     }
     return specFromResolved(r);
   }

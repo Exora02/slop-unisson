@@ -1,19 +1,22 @@
 import 'dart:io' show Directory;
 
+import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import 'core/audio_handler.dart';
 import 'core/models.dart';
-import 'core/player_service.dart';
 import 'core/provider.dart';
 import 'core/library_service.dart';
+import 'core/queue.dart';
 import 'providers/local/local_provider.dart';
 import 'providers/qobuz/qobuz_provider.dart';
 import 'providers/qobuz/qobuz_login_screen.dart';
 import 'providers/ytm/ytm_provider.dart';
+import 'ui/mini_player.dart';
 
-const appBuildTag = 'v0.1.6-diag';
+const appBuildTag = 'v0.2.0-player';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -78,7 +81,6 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   late final List<MusicProvider> _providers;
   late final LibraryService _library;
-  final _player = PlayerService();
   final _controller = TextEditingController();
   final _localRoot = 'PATH_TO_LOCAL_MUSIC_ROOT'; // user-configurable later
   final _secure = const FlutterSecureStorage();
@@ -86,11 +88,11 @@ class _HomeScreenState extends State<HomeScreen> {
   late final YtmProvider _ytm;
   late final LocalProvider? _local;
   late final QobuzProvider _qobuz;
+  late final Future<UnissonAudioHandler> _handlerFuture;
 
   List<MergedTrack> _results = [];
   bool _searching = false;
   String? _error;
-  MergedTrack? _resolving;
   String? _playingSource;
   QualityPref _quality = QualityPref.highest;
 
@@ -113,6 +115,22 @@ class _HomeScreenState extends State<HomeScreen> {
       _ytm,
     ];
     _library = LibraryService(_providers);
+    _handlerFuture = _startAudioService();
+  }
+
+  Future<UnissonAudioHandler> _startAudioService() async {
+    UnissonAudioHandlerFactory.prepare(_library);
+    final handler = await AudioService.init(
+      builder: UnissonAudioHandlerFactory.build,
+      config: const AudioServiceConfig(
+        androidNotificationChannelId: 'com.example.unisson.channel.audio',
+        androidNotificationChannelName: 'Unisson playback',
+      ),
+    );
+    handler.errorStream.listen((msg) {
+      if (mounted) setState(() => _error = msg);
+    });
+    return handler;
   }
 
   @override
@@ -120,7 +138,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _ytm.dispose();
     _local?.dispose();
     _qobuz.dispose();
-    _player.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -155,29 +172,22 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _play(MergedTrack t, {String? sourceId}) async {
-    final src = sourceId ?? t.bestSourceId;
-    setState(() {
-      _resolving = t;
-      _playingSource = src;
-    });
-    try {
-      final rr = sourceId != null
-          ? await _library.resolve(t, sourceId, _quality)
-          : await _library.resolveAuto(t, _quality);
-      await _player.play(
-        Track(
-          providerId: src,
-          id: rr.stream.uri.toString(),
-          title: rr.title,
-          artists: rr.artists,
+    final handler = await _handlerFuture;
+    handler.quality = _quality;
+    // Tapping a search result builds a queue from the current results
+    // starting at that track.
+    final startIdx = _results.indexWhere((r) => r.universalKey == t.universalKey);
+    final entries = <QueueEntry>[
+      for (var i = (startIdx == -1 ? 0 : startIdx); i < _results.length; i++)
+        QueueEntry(
+          track: _results[i],
+          sourceId: i == (startIdx == -1 ? 0 : startIdx) ? sourceId : null,
         ),
-        rr.stream,
-      );
-    } catch (e) {
-      setState(() => _error = 'Play failed: $e');
-    } finally {
-      setState(() => _resolving = null);
-    }
+      if (_results.isEmpty) QueueEntry(track: t, sourceId: sourceId),
+    ];
+    if (entries.isEmpty) entries.add(QueueEntry(track: t, sourceId: sourceId));
+    setState(() => _playingSource = sourceId ?? t.bestSourceId);
+    await handler.playQueue(entries, startIndex: 0);
   }
 
   @override
@@ -352,8 +362,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     itemCount: _results.length,
                     itemBuilder: (context, i) {
                       final t = _results[i];
-                      final isCurrent = _player.current?.title == t.title;
-                      final isResolving = _resolving?.universalKey == t.universalKey;
                       final badgeSources = t.sources.keys.toList()..sort((a, b) {
                         const order = ['local', 'qobuz', 'ytm'];
                         int rank(String s) {
@@ -362,80 +370,106 @@ class _HomeScreenState extends State<HomeScreen> {
                         }
                         return rank(a).compareTo(rank(b));
                       });
-                      return ListTile(
-                        leading: ClipRRect(
-                          borderRadius: BorderRadius.circular(6),
-                          child: t.artwork != null
-                              ? Image.network(
-                                  t.artwork!,
-                                  width: 48,
-                                  height: 48,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) =>
-                                      const Icon(Icons.music_note),
-                                )
-                              : const Icon(Icons.music_note),
-                        ),
-                        title: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                t.title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: isCurrent
-                                    ? TextStyle(color: primary)
-                                    : null,
-                              ),
-                            ),
-                            ...badgeSources.map((s) => Padding(
-                                  padding: const EdgeInsets.only(left: 4),
-                                  child: _SourceBadge(
-                                    source: s,
-                                    isActive: s == _playingSource,
-                                  ),
-                                )),
-                          ],
-                        ),
-                        subtitle: Text(
-                          '${t.artists.join(', ')}${t.album != null ? ' — ${t.album}' : ''}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        trailing: isResolving
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : PopupMenuButton<String>(
-                                icon: const Icon(Icons.source_rounded),
-                                tooltip: 'Choose source',
-                                onSelected: (src) => _play(t, sourceId: src),
-                                itemBuilder: (context) => [
-                                  for (final s in badgeSources)
-                                    PopupMenuItem(
-                                      value: s,
-                                      child: Text('Play from $s'),
+                      return FutureBuilder<UnissonAudioHandler>(
+                        future: _handlerFuture,
+                        builder: (context, hSnap) {
+                          final handler = hSnap.data;
+                          return StreamBuilder<MediaItem?>(
+                            stream: handler?.mediaItem,
+                            builder: (context, itemSnap) {
+                              final nowId = itemSnap.data?.id;
+                              final isCurrent = nowId != null &&
+                                  nowId.endsWith(':${t.sources[t.bestSourceId]?.id}');
+                              return ListTile(
+                                leading: ClipRRect(
+                                  borderRadius: BorderRadius.circular(6),
+                                  child: t.artwork != null
+                                      ? Image.network(
+                                          t.artwork!,
+                                          width: 48,
+                                          height: 48,
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (_, __, ___) =>
+                                              const Icon(Icons.music_note),
+                                        )
+                                      : const Icon(Icons.music_note),
+                                ),
+                                title: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        t.title,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: isCurrent
+                                            ? TextStyle(color: primary)
+                                            : null,
+                                      ),
                                     ),
-                                ],
-                              ),
-                        onTap: isCurrent
-                            ? () => _player.toggle()
-                            : () => _play(t),
+                                    ...badgeSources.map((s) => Padding(
+                                          padding: const EdgeInsets.only(left: 4),
+                                          child: _SourceBadge(
+                                            source: s,
+                                            isActive: s == _playingSource,
+                                          ),
+                                        )),
+                                  ],
+                                ),
+                                subtitle: Text(
+                                  '${t.artists.join(', ')}${t.album != null ? ' — ${t.album}' : ''}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                trailing: PopupMenuButton<String>(
+                                  icon: const Icon(Icons.more_vert),
+                                  tooltip: 'More',
+                                  onSelected: (action) {
+                                    if (action.startsWith('from:')) {
+                                      _play(t, sourceId: action.substring(5));
+                                    } else if (action == 'next' && handler != null) {
+                                      handler.playNext(QueueEntry(track: t));
+                                    } else if (action == 'queue' && handler != null) {
+                                      handler.addToQueue(QueueEntry(track: t));
+                                    }
+                                  },
+                                  itemBuilder: (context) => [
+                                    for (final s in badgeSources)
+                                      PopupMenuItem(
+                                        value: 'from:$s',
+                                        child: Text('Play from $s'),
+                                      ),
+                                    const PopupMenuDivider(),
+                                    const PopupMenuItem(
+                                      value: 'next',
+                                      child: Text('Play next'),
+                                    ),
+                                    const PopupMenuItem(
+                                      value: 'queue',
+                                      child: Text('Add to queue'),
+                                    ),
+                                  ],
+                                ),
+                                onTap: isCurrent
+                                    ? null
+                                    : () => _play(t),
+                              );
+                            },
+                          );
+                        },
                       );
                     },
                   ),
           ),
         ],
       ),
-      bottomNavigationBar: _player.current == null
-          ? null
-          : NowPlayingBar(
-              title: _player.current!.title,
-              artists: _player.current!.artists,
-              player: _player,
-            ),
+      bottomNavigationBar: FutureBuilder<UnissonAudioHandler>(
+        future: _handlerFuture,
+        builder: (context, snap) {
+          final handler = snap.data;
+          if (handler == null) return const SizedBox.shrink();
+          return MiniPlayer(handler: handler);
+        },
+      ),
     );
   }
 }
@@ -481,53 +515,4 @@ class _SourceBadge extends StatelessWidget {
         'ytm' => 'YouTube Music',
         _ => s,
       };
-}
-
-class NowPlayingBar extends StatelessWidget {
-  final String title;
-  final List<String> artists;
-  final PlayerService player;
-
-  const NowPlayingBar({
-    super.key,
-    required this.title,
-    required this.artists,
-    required this.player,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        border: Border(
-          top: BorderSide(color: Theme.of(context).dividerColor),
-        ),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                Text(
-                  artists.join(', '),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.pause_circle_filled),
-            onPressed: () => player.toggle(),
-          ),
-        ],
-      ),
-    );
-  }
 }
