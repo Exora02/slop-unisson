@@ -1,5 +1,6 @@
 import 'dart:io' show Directory;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -12,13 +13,45 @@ import 'providers/qobuz/qobuz_provider.dart';
 import 'providers/qobuz/qobuz_login_screen.dart';
 import 'providers/ytm/ytm_provider.dart';
 
+const appBuildTag = 'v0.1.6-diag';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const UnisonApp());
 }
 
-class UnisonApp extends StatelessWidget {
+class UnisonApp extends StatefulWidget {
   const UnisonApp({super.key});
+
+  @override
+  State<UnisonApp> createState() => _UnisonAppState();
+}
+
+class _UnisonAppState extends State<UnisonApp> {
+  final List<String> _crashes = [];
+
+  @override
+  void initState() {
+    super.initState();
+    // Global net: ANY uncaught error (widget build, async, platform) gets
+    // shown on screen with its stack trace so we can see file:line.
+    FlutterError.onError = (details) {
+      FlutterError.presentError(details);
+      _record('${details.exception}\n${details.stack.toString().split('\n').take(6).join('\n')}');
+    };
+    PlatformDispatcher.instance.onError = (error, stack) {
+      _record('$error\n${stack.toString().split('\n').take(6).join('\n')}');
+      return true;
+    };
+  }
+
+  void _record(String msg) {
+    if (!mounted) return;
+    setState(() {
+      _crashes.insert(0, msg);
+      if (_crashes.length > 3) _crashes.removeLast();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -29,13 +62,14 @@ class UnisonApp extends StatelessWidget {
         colorSchemeSeed: const Color(0xFFEC8603),
         useMaterial3: true,
       ),
-      home: const HomeScreen(),
+      home: HomeScreen(crashes: _crashes),
     );
   }
 }
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  final List<String> crashes;
+  const HomeScreen({super.key, required this.crashes});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -156,6 +190,10 @@ class _HomeScreenState extends State<HomeScreen> {
             const Icon(Icons.album_rounded),
             const SizedBox(width: 10),
             const Text('Unison'),
+            const SizedBox(width: 6),
+            Text(appBuildTag,
+                style: const TextStyle(
+                    fontSize: 10, color: Colors.white38)),
             const SizedBox(width: 12),
             ..._providers.map((p) => Padding(
                   padding: const EdgeInsets.only(right: 4),
@@ -227,6 +265,50 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Column(
         children: [
+          if (widget.crashes.isNotEmpty)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF3B0A0A),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.bug_report,
+                          size: 16, color: Colors.redAccent),
+                      const SizedBox(width: 6),
+                      const Text('Captured crash (last ${appBuildTag})',
+                          style: TextStyle(
+                              fontSize: 12, fontWeight: FontWeight.bold)),
+                      const Spacer(),
+                      GestureDetector(
+                        onTap: () {
+                          // rebuild clears nothing automatically; just note it
+                        },
+                        child: const Icon(Icons.close,
+                            size: 14, color: Colors.white38),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    widget.crashes.first,
+                    maxLines: 8,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 10,
+                        fontFamily: 'monospace',
+                        color: Colors.redAccent),
+                  ),
+                ],
+              ),
+            ),
           Padding(
             padding: const EdgeInsets.all(12),
             child: Row(
