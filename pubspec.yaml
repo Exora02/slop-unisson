@@ -10,6 +10,9 @@ dependencies:
   flutter:
     sdk: flutter
   just_audio: ^0.10.6
+  audio_service: ^0.18.17
+  audio_session: ^0.1.25
+  rxdart: ^0.28.0
   http: ^1.2.0
   crypto: ^3.0.0
   path_provider: ^2.1.0
