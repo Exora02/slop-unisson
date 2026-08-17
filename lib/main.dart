@@ -22,7 +22,7 @@ import 'ui/import_sheet.dart';
 import 'ui/library_screen.dart';
 import 'ui/mini_player.dart';
 
-const appBuildTag = 'v0.4.0-import';
+const appBuildTag = 'v0.4.1-paging';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

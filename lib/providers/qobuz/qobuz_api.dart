@@ -274,7 +274,9 @@ class QobuzApi {
         'limit': '$limit',
         'offset': '$offset',
       });
-      final items = (j['playlists']?['items'] as List<dynamic>?) ?? [];
+      final playlists = j['playlists'] as Map<String, dynamic>?;
+      final items = (playlists?['items'] as List<dynamic>?) ?? [];
+      final total = (playlists?['total'] as num?)?.toInt() ?? 0;
       for (final e in items) {
         try {
           final p = QobuzPlaylist.fromJson(e as Map<String, dynamic>);
@@ -282,7 +284,13 @@ class QobuzApi {
         } catch (_) {}
       }
       offset += limit;
-      if (items.length < limit) break;
+      if (items.isEmpty) break;
+      // Qobuz silently caps pages below the requested limit, so a short
+      // page is NOT the end - keep going while the reported total says
+      // there is more (matches Music Assistant's _get_all_items).
+      if (items.length < limit && !(items.isNotEmpty && total > out.length)) {
+        break;
+      }
     }
     return out;
   }
@@ -298,7 +306,9 @@ class QobuzApi {
         'limit': '$limit',
         'offset': '$offset',
       });
-      final items = (j['tracks']?['items'] as List<dynamic>?) ?? [];
+      final tracks = j['tracks'] as Map<String, dynamic>?;
+      final items = (tracks?['items'] as List<dynamic>?) ?? [];
+      final total = (tracks?['total'] as num?)?.toInt() ?? 0;
       for (final e in items) {
         try {
           final t = QobuzTrack.fromJson(e as Map<String, dynamic>);
@@ -306,7 +316,10 @@ class QobuzApi {
         } catch (_) {}
       }
       offset += limit;
-      if (items.length < limit) break;
+      if (items.isEmpty) break;
+      if (items.length < limit && !(items.isNotEmpty && total > out.length)) {
+        break;
+      }
     }
     return out;
   }
@@ -322,7 +335,9 @@ class QobuzApi {
         'limit': '$limit',
         'offset': '$offset',
       });
-      final items = (j['tracks']?['items'] as List<dynamic>?) ?? [];
+      final tracks = j['tracks'] as Map<String, dynamic>?;
+      final items = (tracks?['items'] as List<dynamic>?) ?? [];
+      final total = (tracks?['total'] as num?)?.toInt() ?? 0;
       for (final e in items) {
         try {
           final t = QobuzTrack.fromJson(e as Map<String, dynamic>);
@@ -330,7 +345,10 @@ class QobuzApi {
         } catch (_) {}
       }
       offset += limit;
-      if (items.length < limit) break;
+      if (items.isEmpty) break;
+      if (items.length < limit && !(items.isNotEmpty && total > out.length)) {
+        break;
+      }
     }
     return out;
   }

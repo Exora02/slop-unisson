@@ -81,7 +81,17 @@ class ImportService {
     final tracks = await _fetchTracks(source);
     if (tracks.isEmpty) return 0;
 
-    final local = await store.createPlaylist(source.title);
+    // Reuse an existing local playlist with the same name so re-imports
+    // top up truncated playlists instead of creating duplicates
+    // (the store dedupes tracks per playlist by universalKey).
+    Playlist? local;
+    for (final p in store.playlistsStream.value) {
+      if (p.name == source.title) {
+        local = p;
+        break;
+      }
+    }
+    local ??= await store.createPlaylist(source.title);
     var added = 0;
     for (final t in tracks) {
       final merged = MergedTrack(

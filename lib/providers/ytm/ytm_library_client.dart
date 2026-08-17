@@ -162,21 +162,106 @@ class YtmLibraryClient {
   }
 
   /// Tracks of one playlist ("LM" = liked songs).
+  /// Follows InnerTube continuation tokens - shelves page at 100 items.
   Future<List<Track>> getPlaylistTracks(String playlistId) async {
     final browseId = playlistId.startsWith('VL') ? playlistId : 'VL$playlistId';
     final j = await _browse({'browseId': browseId});
     final out = <Track>[];
     final seen = <String>{};
+
+    // Initial page lives in a playlist shelf; continuations come back in
+    // a different structure, so collect items generically from each page.
     final shelf = _find(j, 'musicPlaylistShelfRenderer') ??
         _find(j, 'musicShelfRenderer');
-    final contents = shelf is Map ? shelf['contents'] as List? : null;
+    String? continuation = shelf is Map
+        ? _continuationOf(shelf)
+        : _findContinuation(j);
+    final firstContents = shelf is Map ? shelf['contents'] as List? : null;
+    _collectTracks(firstContents, out, seen);
+
+    var pages = 0;
+    while (continuation != null && pages < 200) {
+      pages++;
+      final cj = await _continue(continuation);
+      final pageItems = _find(cj, 'musicPlaylistShelfContinuation') ??
+          _find(cj, 'musicShelfContinuation') ??
+          _find(cj, 'contents');
+      final contents = pageItems is Map
+          ? pageItems['contents'] as List?
+          : pageItems is List
+              ? pageItems
+              : null;
+      if (contents == null || contents.isEmpty) break;
+      final before = out.length;
+      _collectTracks(contents, out, seen);
+      final next = pageItems is Map
+          ? _continuationOf(pageItems)
+          : _findContinuation(cj);
+      // Stop if the page added nothing new and offers no continuation.
+      if (out.length == before && next == null) break;
+      continuation = next;
+    }
+    return out;
+  }
+
+  void _collectTracks(
+      List<dynamic>? contents, List<Track> out, Set<String> seen) {
     for (final item in contents ?? const []) {
-      final mrlir = item is Map ? item['musicResponsiveListItemRenderer'] : null;
+      final mrlir =
+          item is Map ? item['musicResponsiveListItemRenderer'] : null;
       if (mrlir == null) continue;
       final t = _parseTrack(mrlir as Map<String, dynamic>);
       if (t != null && seen.add(t.id)) out.add(t);
     }
-    return out;
+  }
+
+  /// continuationItemRenderer token inside a renderer's contents/continuations.
+  String? _continuationOf(Map renderer) {
+    final token = _find(renderer, 'continuationCommand');
+    if (token is Map) return token['token'] as String?;
+    return null;
+  }
+
+  String? _findContinuation(dynamic node) {
+    final cmd = _find(node, 'continuationCommand');
+    if (cmd is Map) return cmd['token'] as String?;
+    return null;
+  }
+
+  /// InnerTube /next with a continuation token.
+  Future<Map<String, dynamic>> _continue(String token) async {
+    if (!isLoggedIn) throw StateError('YTM not logged in');
+    final body = {
+      'continuation': token,
+      'context': {
+        'client': {
+          'clientName': 'WEB_REMIX',
+          'clientVersion': ytmWebClientVersion(),
+          'hl': 'en',
+          'gl': 'US',
+        },
+        'user': <String, dynamic>{},
+      },
+    };
+    final resp = await _http
+        .post(
+          Uri.parse('$ytmApiBase/next?key=$ytmWebKey&alt=json'),
+          headers: {
+            'User-Agent': ytmUserAgent,
+            'Content-Type': 'application/json',
+            'Origin': ytmDomain,
+            'Referer': '$ytmDomain/',
+            'Cookie': _cookie!,
+            'Authorization': _authorization(),
+            'x-goog-authuser': '0',
+          },
+          body: jsonEncode(body),
+        )
+        .timeout(const Duration(seconds: 25));
+    if (resp.statusCode >= 400) {
+      throw Exception('YTM next HTTP ${resp.statusCode}');
+    }
+    return jsonDecode(resp.body) as Map<String, dynamic>;
   }
 
   Track? _parseTrack(Map<String, dynamic> m) {
