@@ -17,7 +17,7 @@ import 'providers/qobuz/qobuz_login_screen.dart';
 import 'providers/ytm/ytm_provider.dart';
 import 'ui/mini_player.dart';
 
-const appBuildTag = 'v0.2.1-sqlfix';
+const appBuildTag = 'v0.2.2-engine';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
