@@ -4,3 +4,7 @@ flutter/ephemeral/
 spike/.venv/
 *.iml
 .idea/
+
+# local debug/verification scripts
+check_*.py
+validate_ci.py
