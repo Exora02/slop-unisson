@@ -13,6 +13,9 @@ class QobuzProvider implements MusicProvider {
 
   bool _loggedIn = false;
 
+  /// Exposed for the import service (playlists/favorites).
+  QobuzApi get api => _api;
+
   QobuzProvider({
     required Future<String?> Function() loadToken,
     required Future<void> Function(String token) saveToken,

@@ -9,6 +9,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'core/audio_handler.dart';
 import 'core/models.dart';
 import 'core/provider.dart';
+import 'core/import_service.dart';
 import 'core/library_service.dart';
 import 'core/library_store.dart';
 import 'core/queue.dart';
@@ -16,10 +17,12 @@ import 'providers/local/local_provider.dart';
 import 'providers/qobuz/qobuz_provider.dart';
 import 'providers/qobuz/qobuz_login_screen.dart';
 import 'providers/ytm/ytm_provider.dart';
+import 'providers/ytm/ytm_login_screen.dart';
+import 'ui/import_sheet.dart';
 import 'ui/library_screen.dart';
 import 'ui/mini_player.dart';
 
-const appBuildTag = 'v0.3.0-library';
+const appBuildTag = 'v0.4.0-import';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -103,7 +106,12 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _ytm = YtmProvider();
+    _ytm = YtmProvider(
+      loadCookie: () => _secure.read(key: 'ytm_cookie'),
+      saveCookie: (c) => _secure.write(key: 'ytm_cookie', value: c),
+      clearCookie: () => _secure.delete(key: 'ytm_cookie'),
+    );
+    _ytm.restoreSession();
     _local = _localRoot == 'PATH_TO_LOCAL_MUSIC_ROOT'
         ? null
         : LocalProvider([Directory(_localRoot)]);
@@ -167,6 +175,32 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _disconnectQobuz() async {
     await _qobuz.logout();
     if (mounted) setState(() {});
+  }
+
+  Future<void> _connectYtm() async {
+    final cookie = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => const YtmLoginScreen()),
+    );
+    if (cookie != null && cookie.isNotEmpty) {
+      await _ytm.loginWithCookie(cookie);
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _disconnectYtm() async {
+    await _ytm.logout();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _openImport() async {
+    final store = await _storeFuture;
+    final importer = ImportService(
+      qobuz: _qobuz.isConfigured ? _qobuz : null,
+      ytm: _ytm,
+      store: store,
+    );
+    if (!mounted) return;
+    await ImportSheet.show(context, importer);
   }
 
   Future<void> _search() async {
@@ -239,6 +273,9 @@ class _HomeScreenState extends State<HomeScreen> {
             onSelected: (value) {
               if (value == 'qobuz_login') _connectQobuz();
               if (value == 'qobuz_logout') _disconnectQobuz();
+              if (value == 'ytm_login') _connectYtm();
+              if (value == 'ytm_logout') _disconnectYtm();
+              if (value == 'import') _openImport();
               if (value == 'quality_highest') setState(() => _quality = QualityPref.highest);
               if (value == 'quality_balanced') setState(() => _quality = QualityPref.balanced);
               if (value == 'quality_lowest') setState(() => _quality = QualityPref.lowest);
@@ -263,6 +300,33 @@ class _HomeScreenState extends State<HomeScreen> {
                     title: Text('Disconnect Qobuz'),
                   ),
                 ),
+              if (!_ytm.isLoggedIn)
+                const PopupMenuItem(
+                  value: 'ytm_login',
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.login, color: Colors.redAccent),
+                    title: Text('Connect YouTube Music'),
+                    subtitle: Text('for library import'),
+                  ),
+                )
+              else
+                const PopupMenuItem(
+                  value: 'ytm_logout',
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.logout, color: Colors.red),
+                    title: Text('Disconnect YouTube Music'),
+                  ),
+                ),
+              const PopupMenuItem(
+                value: 'import',
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(Icons.download),
+                  title: Text('Import playlists & favorites'),
+                ),
+              ),
               const PopupMenuDivider(),
               const PopupMenuItem(
                 enabled: false,

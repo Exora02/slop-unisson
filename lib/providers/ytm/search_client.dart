@@ -2,11 +2,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
-const _ytmDomain = 'https://music.youtube.com';
-const _apiBase = '$_ytmDomain/youtubei/v1';
-const _webKey = 'AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30';
-const _userAgent =
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:88.0) Gecko/20100101 Firefox/88.0';
+import 'ytm_config.dart';
+
 const _songsParam = 'EgWKAQIIAWoMEA4QChADEAQQCRAF';
 
 class YtmSong {
@@ -33,16 +30,13 @@ class YtmSearchClient {
 
   Future<List<YtmSong>> searchSongs(String query) async {
     await _ensureVisitorId();
-    final d = DateTime.now().toUtc();
-    final ymd =
-        '${d.year.toString().padLeft(4, '0')}${d.month.toString().padLeft(2, '0')}${d.day.toString().padLeft(2, '0')}';
     final body = {
       'query': query,
       'params': _songsParam,
       'context': {
         'client': {
           'clientName': 'WEB_REMIX',
-          'clientVersion': '1.$ymd.01.00',
+          'clientVersion': ytmWebClientVersion(),
         },
         'user': <String, dynamic>{},
       },
@@ -50,12 +44,12 @@ class YtmSearchClient {
 
     final resp = await _http
         .post(
-          Uri.parse('$_apiBase/search?key=$_webKey&alt=json'),
+          Uri.parse('$ytmApiBase/search?key=$ytmWebKey&alt=json'),
           headers: {
-            'User-Agent': _userAgent,
+            'User-Agent': ytmUserAgent,
             'Accept': '*/*',
             'Content-Type': 'application/json',
-            'Origin': _ytmDomain,
+            'Origin': ytmDomain,
             if (_visitorId != null) 'X-Goog-Visitor-Id': _visitorId!,
           },
           body: jsonEncode(body),
@@ -180,8 +174,8 @@ class YtmSearchClient {
     if (_visitorId != null) return;
     try {
       final resp = await _http
-          .get(Uri.parse(_ytmDomain),
-              headers: {'User-Agent': _userAgent})
+          .get(Uri.parse(ytmDomain),
+              headers: {'User-Agent': ytmUserAgent})
           .timeout(const Duration(seconds: 15));
       final m = RegExp(r'ytcfg\.set\(\s*({.+?})\s*\)\s*;').firstMatch(resp.body);
       if (m != null) {

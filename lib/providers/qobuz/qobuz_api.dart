@@ -87,6 +87,30 @@ class QobuzTrack {
   }
 }
 
+class QobuzPlaylist {
+  final String id;
+  final String name;
+  final int tracksCount;
+  final String? artwork;
+
+  QobuzPlaylist({
+    required this.id,
+    required this.name,
+    this.tracksCount = 0,
+    this.artwork,
+  });
+
+  factory QobuzPlaylist.fromJson(Map<String, dynamic> j) {
+    final img = j['images300'] as List<dynamic>?;
+    return QobuzPlaylist(
+      id: j['id']?.toString() ?? '',
+      name: j['name']?.toString() ?? 'Playlist',
+      tracksCount: (j['tracks_count'] as num?)?.toInt() ?? 0,
+      artwork: (img != null && img.isNotEmpty) ? img.first?.toString() : null,
+    );
+  }
+}
+
 class QobuzApi {
   final _http = http.Client();
   final String Function() _tokenProvider;
@@ -238,6 +262,77 @@ class QobuzApi {
       throw Exception('Qobuz getFileUrl field-type mismatch: $e '
           '(keys=${j.keys.toList().take(8)})');
     }
+  }
+
+  /// All playlists in the user's library (paginated, MA-style).
+  Future<List<QobuzPlaylist>> getUserPlaylists() async {
+    final out = <QobuzPlaylist>[];
+    var offset = 0;
+    const limit = 100;
+    while (true) {
+      final j = await _get('playlist/getUserPlaylists', params: {
+        'limit': '$limit',
+        'offset': '$offset',
+      });
+      final items = (j['playlists']?['items'] as List<dynamic>?) ?? [];
+      for (final e in items) {
+        try {
+          final p = QobuzPlaylist.fromJson(e as Map<String, dynamic>);
+          if (p.id.isNotEmpty) out.add(p);
+        } catch (_) {}
+      }
+      offset += limit;
+      if (items.length < limit) break;
+    }
+    return out;
+  }
+
+  /// Tracks of one playlist (paginated).
+  Future<List<QobuzTrack>> getPlaylistTracks(String playlistId) async {
+    final out = <QobuzTrack>[];
+    var offset = 0;
+    const limit = 100;
+    while (true) {
+      final j = await _get('playlist/get', params: {
+        'playlist_id': playlistId,
+        'limit': '$limit',
+        'offset': '$offset',
+      });
+      final items = (j['tracks']?['items'] as List<dynamic>?) ?? [];
+      for (final e in items) {
+        try {
+          final t = QobuzTrack.fromJson(e as Map<String, dynamic>);
+          if (t.id.isNotEmpty && t.streamable) out.add(t);
+        } catch (_) {}
+      }
+      offset += limit;
+      if (items.length < limit) break;
+    }
+    return out;
+  }
+
+  /// Favorited tracks in the user's library (paginated).
+  Future<List<QobuzTrack>> getFavoriteTracks() async {
+    final out = <QobuzTrack>[];
+    var offset = 0;
+    const limit = 100;
+    while (true) {
+      final j = await _get('favorite/getUserFavorites', params: {
+        'type': 'tracks',
+        'limit': '$limit',
+        'offset': '$offset',
+      });
+      final items = (j['tracks']?['items'] as List<dynamic>?) ?? [];
+      for (final e in items) {
+        try {
+          final t = QobuzTrack.fromJson(e as Map<String, dynamic>);
+          if (t.id.isNotEmpty && t.streamable) out.add(t);
+        } catch (_) {}
+      }
+      offset += limit;
+      if (items.length < limit) break;
+    }
+    return out;
   }
 
   void dispose() {

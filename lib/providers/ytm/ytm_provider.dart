@@ -2,16 +2,52 @@ import '../../core/models.dart';
 import '../../core/provider.dart';
 import 'innertube.dart';
 import 'search_client.dart';
+import 'ytm_library_client.dart';
 
 class YtmProvider implements MusicProvider {
   final YtmSearchClient _search = YtmSearchClient();
   final InnerTubeClient _streams = InnerTubeClient();
+  final YtmLibraryClient _library = YtmLibraryClient();
+
+  final Future<String?> Function() _loadCookie;
+  final Future<void> Function(String cookie) _saveCookie;
+  final Future<void> Function() _clearCookie;
+
+  YtmProvider({
+    Future<String?> Function()? loadCookie,
+    Future<void> Function(String cookie)? saveCookie,
+    Future<void> Function()? clearCookie,
+  })  : _loadCookie = loadCookie ?? (() async => null),
+        _saveCookie = saveCookie ?? ((_) async {}),
+        _clearCookie = clearCookie ?? (() async {});
 
   @override
   String get id => 'ytm';
 
   @override
   bool get isConfigured => true;
+
+  /// True once a logged-in YTM session (auth cookie) is available.
+  bool get isLoggedIn => _library.isLoggedIn;
+
+  YtmLibraryClient get libraryClient => _library;
+
+  Future<void> restoreSession() async {
+    final c = await _loadCookie();
+    if (c != null && c.isNotEmpty) {
+      _library.setCookie(c);
+    }
+  }
+
+  Future<void> loginWithCookie(String cookieHeader) async {
+    _library.setCookie(cookieHeader);
+    await _saveCookie(cookieHeader);
+  }
+
+  Future<void> logout() async {
+    _library.clearCookie();
+    await _clearCookie();
+  }
 
   @override
   Future<SearchResults> search(String query) async {
@@ -48,5 +84,6 @@ class YtmProvider implements MusicProvider {
   void dispose() {
     _search.dispose();
     _streams.dispose();
+    _library.dispose();
   }
 }
