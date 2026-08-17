@@ -1,4 +1,4 @@
-# Unison
+# Unisson
 
 One music player for everything you listen to: local files (MP3/FLAC), Qobuz (hi-res),
 YouTube Music (breadth). Spotify/Tidal later. Cross-platform: Win/Mac/Linux/Android, iOS later.

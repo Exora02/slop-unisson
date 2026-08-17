@@ -1,4 +1,4 @@
-package com.example.unison
+package com.example.unisson
 
 import io.flutter.embedding.android.FlutterActivity
 

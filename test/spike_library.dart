@@ -1,6 +1,6 @@
-import 'package:unison/core/library_service.dart';
-import 'package:unison/core/models.dart';
-import 'package:unison/providers/ytm/ytm_provider.dart';
+import 'package:unisson/core/library_service.dart';
+import 'package:unisson/core/models.dart';
+import 'package:unisson/providers/ytm/ytm_provider.dart';
 
 Future<void> main() async {
   final ytm = YtmProvider();

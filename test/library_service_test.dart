@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:unison/core/library_service.dart';
-import 'package:unison/core/models.dart';
-import 'package:unison/core/provider.dart';
+import 'package:unisson/core/library_service.dart';
+import 'package:unisson/core/models.dart';
+import 'package:unisson/core/provider.dart';
 
 class _FailingProvider implements MusicProvider {
   _FailingProvider(this.id);

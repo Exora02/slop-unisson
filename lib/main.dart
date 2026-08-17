@@ -17,17 +17,17 @@ const appBuildTag = 'v0.1.6-diag';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const UnisonApp());
+  runApp(const UnissonApp());
 }
 
-class UnisonApp extends StatefulWidget {
-  const UnisonApp({super.key});
+class UnissonApp extends StatefulWidget {
+  const UnissonApp({super.key});
 
   @override
-  State<UnisonApp> createState() => _UnisonAppState();
+  State<UnissonApp> createState() => _UnissonAppState();
 }
 
-class _UnisonAppState extends State<UnisonApp> {
+class _UnissonAppState extends State<UnissonApp> {
   final List<String> _crashes = [];
 
   @override
@@ -56,7 +56,7 @@ class _UnisonAppState extends State<UnisonApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Unison',
+      title: 'Unisson',
       theme: ThemeData(
         brightness: Brightness.dark,
         colorSchemeSeed: const Color(0xFFEC8603),
@@ -189,7 +189,7 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             const Icon(Icons.album_rounded),
             const SizedBox(width: 10),
-            const Text('Unison'),
+            const Text('Unisson'),
             const SizedBox(width: 6),
             Text(appBuildTag,
                 style: const TextStyle(

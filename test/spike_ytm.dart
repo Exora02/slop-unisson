@@ -2,8 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
-import 'package:unison/providers/ytm/ytm_provider.dart';
-import 'package:unison/core/models.dart';
+import 'package:unisson/providers/ytm/ytm_provider.dart';
+import 'package:unisson/core/models.dart';
 
 Future<void> main(List<String> args) async {
   final query = args.isNotEmpty ? args.join(' ') : 'daft punk veridis quo';

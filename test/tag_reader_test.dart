@@ -3,7 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:unison/providers/local/tag_reader.dart';
+import 'package:unisson/providers/local/tag_reader.dart';
 
 Uint8List buildFlac({
   required String title,

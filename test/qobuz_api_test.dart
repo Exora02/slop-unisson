@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:unison/providers/qobuz/qobuz_api.dart';
+import 'package:unisson/providers/qobuz/qobuz_api.dart';
 
 void main() {
   test('QobuzTrack.fromJson maps fields', () {
