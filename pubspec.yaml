@@ -12,6 +12,7 @@ dependencies:
   just_audio: ^0.10.6
   audio_service: ^0.18.17
   audio_session: ^0.1.25
+  flutter_cache_manager: ^3.4.2
   rxdart: ^0.28.0
   http: ^1.2.0
   crypto: ^3.0.0

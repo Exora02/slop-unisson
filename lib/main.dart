@@ -3,6 +3,7 @@ import 'dart:io' show Directory;
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'core/audio_handler.dart';
@@ -16,7 +17,7 @@ import 'providers/qobuz/qobuz_login_screen.dart';
 import 'providers/ytm/ytm_provider.dart';
 import 'ui/mini_player.dart';
 
-const appBuildTag = 'v0.2.0-player';
+const appBuildTag = 'v0.2.1-sqlfix';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -122,6 +123,15 @@ class _HomeScreenState extends State<HomeScreen> {
     UnissonAudioHandlerFactory.prepare(_library);
     final handler = await AudioService.init(
       builder: UnissonAudioHandlerFactory.build,
+      // DefaultCacheManager opens a sqflite DB, which races with the
+      // background audio isolate at startup -> SQLITE_BUSY crash.
+      // JsonCacheInfoRepository is sqflite-free.
+      cacheManager: CacheManager(
+        Config(
+          'unissonArtCache',
+          repo: JsonCacheInfoRepository(databaseName: 'unissonArtCache'),
+        ),
+      ),
       config: const AudioServiceConfig(
         androidNotificationChannelId: 'com.example.unisson.channel.audio',
         androidNotificationChannelName: 'Unisson playback',
