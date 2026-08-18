@@ -6,6 +6,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 
 import 'library_service.dart';
+import 'models.dart';
 import 'db/track_codec.dart';
 
 class Playlist {
@@ -258,6 +259,56 @@ class LibraryStore {
         'DELETE FROM recent WHERE key NOT IN (SELECT key FROM recent ORDER BY played_at DESC LIMIT 100)');
     _recentSubject.add(await _queryTracks(
         'SELECT track_json FROM recent ORDER BY played_at DESC LIMIT 100'));
+  }
+
+  /// Merge newly discovered sources into a saved track (all copies:
+  /// favorites, every playlist it appears in, recent) and re-emit streams.
+  Future<void> enrichTrack(String key, Map<String, Track> newSources) async {
+    if (newSources.isEmpty) return;
+    await _db.transaction((txn) async {
+      final favRows = await txn
+          .query('favorites', where: 'key = ?', whereArgs: [key]);
+      for (final row in favRows) {
+        final mt = _decode(row['track_json'] as String);
+        if (mt == null) continue;
+        mt.sources.addAll(newSources);
+        await txn.update('favorites',
+            {'track_json': jsonEncode(mergedTrackToJson(mt))},
+            where: 'key = ?', whereArgs: [key]);
+      }
+      final itemRows = await txn.query('playlist_items',
+          where: 'key = ?', whereArgs: [key]);
+      for (final row in itemRows) {
+        final mt = _decode(row['track_json'] as String);
+        if (mt == null) continue;
+        mt.sources.addAll(newSources);
+        await txn.update(
+            'playlist_items',
+            {'track_json': jsonEncode(mergedTrackToJson(mt))},
+            where: 'playlist_id = ? AND key = ?',
+            whereArgs: [row['playlist_id'], key]);
+      }
+      final recentRows =
+          await txn.query('recent', where: 'key = ?', whereArgs: [key]);
+      for (final row in recentRows) {
+        final mt = _decode(row['track_json'] as String);
+        if (mt == null) continue;
+        mt.sources.addAll(newSources);
+        await txn.update('recent',
+            {'track_json': jsonEncode(mergedTrackToJson(mt))},
+            where: 'key = ?', whereArgs: [key]);
+      }
+    });
+    await _loadAll();
+  }
+
+  MergedTrack? _decode(String json) {
+    try {
+      return mergedTrackFromJson(
+          jsonDecode(json) as Map<String, dynamic>);
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> close() async {

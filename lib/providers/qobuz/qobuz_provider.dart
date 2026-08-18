@@ -31,6 +31,9 @@ class QobuzProvider implements MusicProvider {
   String get id => 'qobuz';
 
   @override
+  bool get hasQualityTiers => true;
+
+  @override
   bool get isConfigured => _loggedIn;
 
   Future<void> restoreSession() async {

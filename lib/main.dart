@@ -22,7 +22,7 @@ import 'ui/import_sheet.dart';
 import 'ui/library_screen.dart';
 import 'ui/mini_player.dart';
 
-const appBuildTag = 'v0.4.3-snappy';
+const appBuildTag = 'v0.4.4-polish';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -127,12 +127,12 @@ class _HomeScreenState extends State<HomeScreen> {
       _ytm,
     ];
     _library = LibraryService(_providers);
-    _handlerFuture = _startAudioService();
     _storeFuture = LibraryStore.open();
+    _handlerFuture = _startAudioService();
   }
 
   Future<UnissonAudioHandler> _startAudioService() async {
-    UnissonAudioHandlerFactory.prepare(_library);
+    UnissonAudioHandlerFactory.prepare(_library, _storeFuture);
     final handler = await AudioService.init(
       builder: UnissonAudioHandlerFactory.build,
       // DefaultCacheManager opens a sqflite DB, which races with the

@@ -141,4 +141,29 @@ void main() {
     expect((await store2.playlistTracks(pl.id)).length, 1);
     expect(store2.recentStream.value.length, 1);
   });
+
+  test('enrichTrack merges new sources into every saved copy', () async {
+    final t = track('Dual source');
+    await store.toggleFavorite(t);
+    final pl = await store.createPlaylist('Enrich');
+    await store.addToPlaylist(pl.id, t);
+    await store.addRecent(t);
+
+    final qobuzTrack = Track(
+      providerId: 'qobuz',
+      id: 'qobuz:99',
+      title: 'Dual source',
+      artists: const ['Artist'],
+    );
+    await store.enrichTrack(t.universalKey, {'qobuz': qobuzTrack});
+
+    final favs = store.favoritesStream.value;
+    expect(favs.single.sources.keys, containsAll(['ytm', 'qobuz']));
+
+    final plTracks = await store.playlistTracks(pl.id);
+    expect(plTracks.single.sources.containsKey('qobuz'), isTrue);
+
+    expect(store.recentStream.value.single.sources.containsKey('qobuz'),
+        isTrue);
+  });
 }

@@ -19,6 +19,9 @@ class LocalProvider implements MusicProvider {
   String get id => 'local';
 
   @override
+  bool get hasQualityTiers => false;
+
+  @override
   bool get isConfigured => _roots.isNotEmpty;
 
   void dispose() {

@@ -10,6 +10,8 @@ class _FailingProvider implements MusicProvider {
   @override
   bool get isConfigured => true;
   @override
+  bool get hasQualityTiers => false;
+  @override
   Future<SearchResults> search(String query) async {
     throw Exception('$id search exploded');
   }
@@ -25,6 +27,8 @@ class _OkProvider implements MusicProvider {
   final String id;
   @override
   bool get isConfigured => true;
+  @override
+  bool get hasQualityTiers => false;
   @override
   Future<SearchResults> search(String query) async {
     if (query.contains('nothing matches')) {

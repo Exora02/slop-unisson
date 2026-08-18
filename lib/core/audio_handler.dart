@@ -6,8 +6,8 @@ import 'package:just_audio/just_audio.dart';
 import 'package:rxdart/rxdart.dart';
 
 import 'library_service.dart';
+import 'library_store.dart';
 import 'models.dart';
-import 'provider.dart';
 import 'queue.dart';
 
 /// Central playback service: owns the queue, resolves streams with
@@ -15,6 +15,11 @@ import 'queue.dart';
 /// lock-screen / notification controls work.
 class UnissonAudioHandler extends BaseAudioHandler {
   final LibraryService library;
+
+  /// Library persistence, used to write back source enrichment results.
+  /// Nullable only so tests/factories without a store still work.
+  final Future<LibraryStore>? storeFuture;
+
   final _player = AudioPlayer();
   final _queue = UnissonQueue();
 
@@ -55,17 +60,36 @@ class UnissonAudioHandler extends BaseAudioHandler {
 
   UnissonQueue get unissonQueue => _queue;
 
+  /// Does the given source offer meaningfully different quality tiers
+  /// (hi-res vs CD vs lossy)? Single-format sources don't.
+  bool hasQualityTiers(String sourceId) {
+    final matches = library.providers.where((p) => p.id == sourceId);
+    return matches.isNotEmpty && matches.first.hasQualityTiers;
+  }
+
   /// Monotonic guard: every load bumps it; a load whose generation is no
   /// longer current after an await was superseded (fast skip taps) and must
   /// abandon its result instead of clobbering the newer track.
   int _loadGen = 0;
+
+  /// just_audio cannot run two setAudioSource calls concurrently — they
+  /// deadlock on the platform channel and every control looks dead until a
+  /// later tap happens to get through. Serialize loads: at most one runs;
+  /// a request that arrives mid-load is coalesced (the restart picks up the
+  /// latest queue state) and the running load is interrupted via stop().
+  bool _loading = false;
+  bool _pendingLoad = false;
+  bool _pendingAutoplay = true;
+  Uri? _pendingUri;
+  Duration? _pendingResume;
+  int _pendingGen = 0;
 
   /// Position ticks fire ~4x/s; only broadcast playback state to the
   /// platform channel once per second (event-driven broadcasts stay
   /// immediate). Constant churn here made the UI feel laggy.
   DateTime _lastPosBroadcast = DateTime.fromMillisecondsSinceEpoch(0);
 
-  UnissonAudioHandler({required this.library}) {
+  UnissonAudioHandler({required this.library, this.storeFuture}) {
     _init();
   }
 
@@ -213,22 +237,29 @@ class UnissonAudioHandler extends BaseAudioHandler {
   // ---------- resolution + loading ----------
 
   /// Change the current track's source (and optionally quality) and reload.
+  /// Keeps the playback position so switching doesn't restart the song.
   Future<void> switchSource(String sourceId, {QualityPref? qualityPref}) async {
     final entry = _queue.current;
     if (entry == null) return;
+    final wasPlaying = _player.playing;
+    final pos = _player.position;
     entry.sourceId = sourceId;
     if (qualityPref != null) entry.qualityOverride = qualityPref;
     _broadcastQueue();
-    await _loadCurrent(autoplay: _player.playing);
+    // Resume where we were instead of starting over.
+    await _loadCurrent(
+      autoplay: wasPlaying,
+      resumeAt: pos > Duration.zero ? pos : null,
+    );
   }
 
-  Future<void> _loadCurrent({required bool autoplay}) async {
+  Future<void> _loadCurrent({required bool autoplay, Duration? resumeAt}) async {
     final entry = _queue.current;
     if (entry == null) return;
 
     final gen = ++_loadGen;
 
-    final spec = await _resolveWithFallback(entry);
+    final spec = await _resolveWithFallback(entry, gen);
     if (gen != _loadGen) return; // superseded by a newer skip/load
 
     if (spec == null) {
@@ -241,22 +272,72 @@ class UnissonAudioHandler extends BaseAudioHandler {
     final track = entry.track.sources[source] ?? entry.track.sources.values.first;
     mediaItem.add(_toMediaItem(entry.track, track, spec));
 
+    _enrichInBackground(entry);
+
+    await _applySource(spec.uri, autoplay: autoplay, resumeAt: resumeAt, gen: gen);
+  }
+
+  /// Single-flight around just_audio's setAudioSource. Overlapping calls here
+  /// deadlock the platform channel and make every control look dead. At
+  /// most one apply runs; a request that lands mid-apply is coalesced and the
+  /// latest one replays when the current apply finishes.
+  Future<void> _applySource(
+    Uri uri, {
+    required bool autoplay,
+    Duration? resumeAt,
+    required int gen,
+  }) async {
+    _pendingAutoplay = autoplay;
+    if (_loading) {
+      _pendingLoad = true;
+      _pendingUri = uri;
+      _pendingResume = resumeAt;
+      _pendingGen = gen;
+      return;
+    }
+    await _runApply(uri, autoplay: autoplay, resumeAt: resumeAt, gen: gen);
+  }
+
+  Future<void> _runApply(
+    Uri uri, {
+    required bool autoplay,
+    Duration? resumeAt,
+    required int gen,
+  }) async {
+    _loading = true;
     try {
+      if (gen != _loadGen) return;
       await _player.setAudioSource(
-        AudioSource.uri(spec.uri),
+        AudioSource.uri(uri),
         preload: true,
+        initialPosition: resumeAt,
       );
       if (gen != _loadGen) return;
       if (autoplay) await _player.play();
     } catch (e) {
-      if (gen != _loadGen) return;
-      _errorSubject.add('Playback error: $e');
+      if (gen == _loadGen) _errorSubject.add('Playback error: $e');
+    } finally {
+      _loading = false;
+      if (_pendingLoad) {
+        _pendingLoad = false;
+        final u = _pendingUri;
+        final r = _pendingResume;
+        final g = _pendingGen;
+        _pendingUri = null;
+        _pendingResume = null;
+        if (u != null) {
+          await _runApply(u,
+              autoplay: _pendingAutoplay, resumeAt: r, gen: g);
+        }
+      }
     }
   }
 
   /// Try the preferred source first, then every other available source in
-  /// priority order. Returns the first stream that resolves.
-  Future<StreamSpec?> _resolveWithFallback(QueueEntry entry) async {
+  /// priority order. Returns the first stream that resolves. Aborts early if
+  /// a newer load has superseded this one, so a stuck source can't hang the
+  /// whole chain.
+  Future<StreamSpec?> _resolveWithFallback(QueueEntry entry, int gen) async {
     final preferred = entry.sourceId ?? entry.track.bestSourceId;
     final order = <String>[
       preferred,
@@ -267,6 +348,7 @@ class UnissonAudioHandler extends BaseAudioHandler {
 
     String? lastError;
     for (final sourceId in order) {
+      if (gen != _loadGen) return null; // superseded — stop trying
       final track = entry.track.sources[sourceId];
       if (track == null) continue;
       final matches = library.providers
@@ -276,12 +358,12 @@ class UnissonAudioHandler extends BaseAudioHandler {
       try {
         return await provider
             .resolveStream(track, pref)
-            .timeout(const Duration(seconds: 20));
+            .timeout(const Duration(seconds: 12));
       } catch (e) {
         lastError = '$sourceId: $e';
       }
     }
-    if (lastError != null) {
+    if (lastError != null && gen == _loadGen) {
       _errorSubject.add('Resolve failed — $lastError');
     }
     return null;
@@ -293,6 +375,62 @@ class UnissonAudioHandler extends BaseAudioHandler {
       _broadcastQueue();
       _loadCurrent(autoplay: true);
     }
+  }
+
+  // ---------- source enrichment ----------
+
+  /// Keys currently being enriched (one search pass per track, ever).
+  final _enriching = <String>{};
+
+  /// Imported/saved tracks are often stored single-source (a YTM import has
+  /// no Qobuz entry even when the song exists there). When such a track
+  /// plays, search the other configured providers in the background and
+  /// merge any exact-key match into the queue entry AND the store, so the
+  /// source chip/switcher grows over time without a re-import.
+  /// Fire-and-forget: never delays playback.
+  void _enrichInBackground(QueueEntry entry) {
+    final storeF = storeFuture;
+    if (storeF == null) return;
+    if (entry.track.sources.length >= 2) return;
+    final key = entry.track.universalKey;
+    if (_enriching.contains(key)) return;
+    _enriching.add(key);
+    () async {
+      try {
+        final found = <String, Track>{};
+        final query =
+            '${entry.track.title} ${entry.track.artists.join(' ')}'.trim();
+        for (final p in library.providers) {
+          if (!p.isConfigured) continue;
+          if (entry.track.sources.containsKey(p.id)) continue;
+          try {
+            final results =
+                await p.search(query).timeout(const Duration(seconds: 10));
+            for (final t in results.tracks.take(5)) {
+              if (_keyOf(t) == key) {
+                found[p.id] = t;
+                break;
+              }
+            }
+          } catch (_) {
+            // one provider's failure must not block the others
+          }
+        }
+        if (found.isNotEmpty) {
+          entry.track.sources.addAll(found);
+          _broadcastQueue();
+          final store = await storeF;
+          await store.enrichTrack(key, found);
+        }
+      } catch (_) {}
+    }();
+  }
+
+  String _keyOf(Track t) {
+    final title = t.title.trim().toLowerCase();
+    final artist =
+        t.artists.isNotEmpty ? t.artists.first.trim().toLowerCase() : '';
+    return '$title|$artist';
   }
 
   // ---------- state broadcast ----------
@@ -354,8 +492,12 @@ enum PlayerStatus { idle, loading, playing, paused, completed }
 /// library. Called once per app lifetime.
 class UnissonAudioHandlerFactory {
   static LibraryService? _library;
+  static Future<LibraryStore>? _store;
 
-  static void prepare(LibraryService library) => _library = library;
+  static void prepare(LibraryService library, Future<LibraryStore> store) {
+    _library = library;
+    _store = store;
+  }
 
   static UnissonAudioHandler build() {
     final lib = _library;
@@ -363,6 +505,6 @@ class UnissonAudioHandlerFactory {
       throw StateError(
           'UnissonAudioHandlerFactory.prepare() must be called before start');
     }
-    return UnissonAudioHandler(library: lib);
+    return UnissonAudioHandler(library: lib, storeFuture: _store);
   }
 }

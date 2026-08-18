@@ -25,6 +25,9 @@ class YtmProvider implements MusicProvider {
   String get id => 'ytm';
 
   @override
+  bool get hasQualityTiers => false;
+
+  @override
   bool get isConfigured => true;
 
   /// True once a logged-in YTM session (auth cookie) is available.

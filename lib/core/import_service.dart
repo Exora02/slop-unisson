@@ -1,7 +1,6 @@
 import '../core/library_service.dart';
 import '../core/library_store.dart';
 import '../core/models.dart';
-import '../providers/qobuz/qobuz_api.dart';
 import '../providers/qobuz/qobuz_provider.dart';
 import '../providers/ytm/ytm_provider.dart';
 

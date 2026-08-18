@@ -214,7 +214,6 @@ class _SourceSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final currentSourceId = item?.extras?['sourceId'] as String?;
 
     return StreamBuilder<QueueEntry?>(
       stream: handler.currentEntryStream,
@@ -225,6 +224,11 @@ class _SourceSheet extends StatelessWidget {
               height: 120, child: Center(child: Text('Nothing playing')));
         }
         final sources = entry.track.sources;
+        final currentSourceId = item?.extras?['sourceId'] as String?;
+        // Quality choice only makes sense where tiers actually differ
+        // (Qobuz: hi-res vs CD vs MP320). YTM/local are single-format.
+        final tiersAvailable = sources.keys
+            .any((id) => handler.hasQualityTiers(id));
         return SafeArea(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
@@ -251,27 +255,29 @@ class _SourceSheet extends StatelessWidget {
                     },
                   ),
                 const SizedBox(height: 4),
-                Text('Quality for this track',
-                    style: theme.textTheme.titleMedium
-                        ?.copyWith(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-                for (final pref in QualityPref.values)
-                  RadioListTile<QualityPref>(
-                    dense: true,
-                    title: Text(_qualityLabels[pref]!),
-                    value: pref,
-                    groupValue: entry.qualityOverride ?? handler.quality,
-                    onChanged: (v) {
-                      if (v == null) return;
-                      // Re-resolve the current source with the new quality;
-                      // if none was pinned, pin the best available one.
-                      handler.switchSource(
-                        currentSourceId ?? entry.track.bestSourceId,
-                        qualityPref: v,
-                      );
-                      Navigator.of(context).pop();
-                    },
-                  ),
+                if (tiersAvailable) ...[
+                  Text('Quality for this track',
+                      style: theme.textTheme.titleMedium
+                          ?.copyWith(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  for (final pref in QualityPref.values)
+                    RadioListTile<QualityPref>(
+                      dense: true,
+                      title: Text(_qualityLabels[pref]!),
+                      value: pref,
+                      groupValue: entry.qualityOverride ?? handler.quality,
+                      onChanged: (v) {
+                        if (v == null) return;
+                        // Re-resolve the current source with the new quality;
+                        // if none was pinned, pin the best available one.
+                        handler.switchSource(
+                          currentSourceId ?? entry.track.bestSourceId,
+                          qualityPref: v,
+                        );
+                        Navigator.of(context).pop();
+                      },
+                    ),
+                ],
               ],
             ),
           ),
