@@ -4,9 +4,10 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../../core/models.dart';
+import 'ytm_config.dart';
+import 'ytm_library_client.dart' show sapisidHash;
 
 const _playerEndpoint = 'https://music.youtube.com/youtubei/v1/player';
-const _configEndpoint = 'https://music.youtube.com/youtubei/v1/config';
 const _androidMusicKey = 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8';
 const _androidKey = 'AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w';
 
@@ -17,53 +18,37 @@ class _Client {
   final String key;
   final int sdk;
   final String userAgent;
-  final String? playerParams;
-  final bool skipVisitorData;
 
-  /// TV clients use a leaner context (no androidSdkVersion/os fields).
-  final bool tv;
+  /// iOS/WEB-style clients use a lean context (no android fields).
+  final bool lean;
+
+  /// Attach the logged-in user's SAPISIDHASH auth when available.
+  final bool auth;
 
   const _Client(this.name, this.code, this.version, this.key, this.sdk,
-      this.userAgent,
-      {this.playerParams, this.skipVisitorData = false, this.tv = false});
+      this.userAgent, {this.lean = false, this.auth = false});
 }
 
+// Ladder verified live on 2026-08-18 against a failing videoId:
+// - ANDROID_MUSIC 7.16.51 passes the precondition check but answers
+//   LOGIN_REQUIRED anonymously -> with the user's cookie it yields the
+//   full-quality opus streams.
+// - IOS is the only client that resolves anonymously (direct AAC urls).
+// Everything else (old ANDROID_MUSIC, ANDROID, ANDROID_VR,
+// ANDROID_TESTSUITE, WEB, MWEB, TVHTML5*) is dead: 400 Precondition
+// check failed / LOGIN_REQUIRED / UNPLAYABLE / "no longer supported".
 const _clients = [
   _Client(
       'ANDROID_MUSIC',
       '21',
-      '5.26.1',
+      '7.16.51',
       _androidMusicKey,
-      33,
-      'com.google.android.apps.youtube.music/5.26.1 (Linux; U; Android 13; en_US) gzip',
-      skipVisitorData: true),
-  _Client(
-      'ANDROID_VR',
-      '28',
-      '1.60.19',
-      _androidKey,
-      33,
-      'com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip'),
-  _Client(
-      'ANDROID',
-      '3',
-      '17.36.4',
-      _androidKey,
-      30,
-      'com.google.android.youtube/17.36.4 (Linux; U; Android 11) gzip',
-      playerParams: 'CgIQBg'),
-  _Client('ANDROID_TESTSUITE', '30', '1.9', _androidKey, 33,
-      'com.google.android.youtube/1.9 (Linux; U; Android 13; en_US) gzip'),
-  // TV clients often escape the bot wall that hits ANDROID_* from
-  // datacenter IPs.
-  _Client(
-      'TVHTML5_SIMPLY_EMBEDDED_PLAYER',
-      '85',
-      '2.0',
-      _androidKey,
-      0,
-      'Mozilla/5.0 (PlayStation; PlayStation 4/12.00) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0 Safari/605.1.15',
-      tv: true),
+      34,
+      'com.google.android.apps.youtube.music/7.16.51 (Linux; U; Android 14; en_US) gzip',
+      auth: true),
+  _Client('IOS', '5', '20.32.4', _androidKey, 0,
+      'com.google.ios.youtube/20.32.4 (iPhone16,2; U; CPU iOS 18_6 like Mac OS X;)',
+      lean: true),
 ];
 
 const _preferredItags = [251, 250, 140];
@@ -95,7 +80,11 @@ class ResolvedStream {
 class InnerTubeClient {
   final _http = http.Client();
   final _cache = <String, ResolvedStream>{};
-  String? _visitorData;
+
+  /// Logged-in YTM cookie, injected by the provider. When present, the
+  /// auth-flagged clients attach a SAPISIDHASH Authorization header —
+  /// authenticated requests bypass the anonymous bot wall entirely.
+  String? cookie;
 
   /// Diagnostic trace of the most recent resolve attempt, one line per
   /// client. Surfaced when resolution fails so we know WHY.
@@ -107,17 +96,13 @@ class InnerTubeClient {
     if (hit != null && !hit.isExpired) return hit;
 
     lastAttemptTrace.clear();
-    await _ensureVisitorData();
     var r = await _tryLadder(videoId);
     if (r != null) {
       _cache[videoId] = r;
       return r;
     }
-    // Second attempt: visitor data may be stale or a client may have
-    // throttled us — refresh it and run the ladder again. This is what
-    // made manual retries succeed; now it happens automatically.
-    _visitorData = null;
-    await _ensureVisitorData();
+    // Second attempt without the auth header's second having rolled over
+    // is pointless; instead retry once in case of transient throttling.
     r = await _tryLadder(videoId);
     if (r != null) {
       _cache[videoId] = r;
@@ -128,6 +113,10 @@ class InnerTubeClient {
 
   Future<ResolvedStream?> _tryLadder(String videoId) async {
     for (final c in _clients) {
+      if (c.auth && cookie == null) {
+        lastAttemptTrace.add('${c.name}: skipped (not logged in)');
+        continue;
+      }
       try {
         final r = await _playerCall(videoId, c);
         if (r != null) return r;
@@ -136,45 +125,26 @@ class InnerTubeClient {
     return null;
   }
 
-  Future<void> _ensureVisitorData() async {
-    if (_visitorData != null) return;
-    try {
-      final body = {
-        'context': {
-          'client': {
-            'clientName': 'ANDROID_MUSIC',
-            'clientVersion': '5.26.1',
-            'androidSdkVersion': 33,
-            'osName': 'Android',
-            'osVersion': '13',
-            'hl': 'en',
-            'gl': 'US',
-          }
-        }
-      };
-      final resp = await _http
-          .post(
-            Uri.parse('$_configEndpoint?key=$_androidMusicKey&prettyPrint=false'),
-            headers: {
-              'Content-Type': 'application/json',
-              'User-Agent':
-                  'com.google.android.apps.youtube.music/5.26.1 (Linux; U; Android 13; en_US) gzip',
-              'X-YouTube-Client-Name': '21',
-              'X-YouTube-Client-Version': '5.26.1',
-            },
-            body: jsonEncode(body),
-          )
-          .timeout(const Duration(seconds: 15));
-      if (resp.statusCode != 200) return;
-      final j = jsonDecode(resp.body) as Map<String, dynamic>;
-      final vd = (j['responseContext']?['visitorData'] as String?) ??
-          (j['visitorData'] as String?);
-      if (vd != null) _visitorData = vd;
-    } catch (_) {}
+  /// SAPISIDHASH Authorization header for the current second, derived
+  /// from the __Secure-3PAPISID cookie value.
+  String? _authorization() {
+    final c = cookie;
+    if (c == null) return null;
+    String? sapisid;
+    for (final part in c.split(';')) {
+      final kv = part.trim().split('=');
+      if (kv.length == 2 &&
+          (kv[0] == '__Secure-3PAPISID' || kv[0] == 'SAPISID')) {
+        sapisid = kv[1];
+      }
+    }
+    if (sapisid == null) return null;
+    final ts = (DateTime.now().millisecondsSinceEpoch ~/ 1000).toString();
+    return sapisidHash(ts, sapisid, ytmDomain);
   }
 
   Future<ResolvedStream?> _playerCall(String videoId, _Client c) async {
-    final ctx = c.tv
+    final ctx = c.lean
         ? <String, dynamic>{
             'clientName': c.name,
             'clientVersion': c.version,
@@ -186,20 +156,16 @@ class InnerTubeClient {
             'clientVersion': c.version,
             'androidSdkVersion': c.sdk,
             'osName': 'Android',
-            'osVersion': c.sdk >= 33 ? '13' : '11',
+            'osVersion': c.sdk >= 34 ? '14' : '13',
             'platform': 'MOBILE',
             'hl': 'en',
             'gl': 'US',
             'utcOffsetMinutes': 0,
           };
-    if (!c.skipVisitorData && !c.tv && _visitorData != null) {
-      ctx['visitorData'] = _visitorData;
-    }
     final body = <String, dynamic>{
       'videoId': videoId,
-      if (c.playerParams != null) 'params': c.playerParams,
       'context': {'client': ctx},
-      if (!c.tv)
+      if (!c.lean)
         'playbackContext': {
           'contentPlaybackContext': {'html5Preference': 'HTML5_PREF_WANTS'}
         },
@@ -207,16 +173,26 @@ class InnerTubeClient {
       'racyCheckOk': true,
     };
 
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'User-Agent': c.userAgent,
+      'X-YouTube-Client-Name': c.code,
+      'X-YouTube-Client-Version': c.version,
+    };
+    if (c.auth && cookie != null) {
+      final auth = _authorization();
+      if (auth != null) {
+        headers['Authorization'] = auth;
+        headers['Origin'] = ytmDomain;
+        headers['Cookie'] = cookie!;
+      }
+    }
+
     final resp = await _http
         .post(
           Uri.parse('$_playerEndpoint?key=${c.key}&prettyPrint=false'),
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-            'User-Agent': c.userAgent,
-            'X-YouTube-Client-Name': c.code,
-            'X-YouTube-Client-Version': c.version,
-          },
+          headers: headers,
           body: jsonEncode(body),
         )
         .timeout(const Duration(seconds: 20));
@@ -234,7 +210,6 @@ class InnerTubeClient {
     if (status != 'OK') {
       final reason = j['playabilityStatus']?['reason'] as String? ?? '';
       lastAttemptTrace.add('${c.name}: status=$status${reason.isEmpty ? '' : ' ($reason)'}');
-      if (status == 'LOGIN_REQUIRED') _visitorData = null;
       return null;
     }
 

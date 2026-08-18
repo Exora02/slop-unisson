@@ -39,16 +39,19 @@ class YtmProvider implements MusicProvider {
     final c = await _loadCookie();
     if (c != null && c.isNotEmpty) {
       _library.setCookie(c);
+      _streams.cookie = c;
     }
   }
 
   Future<void> loginWithCookie(String cookieHeader) async {
     _library.setCookie(cookieHeader);
+    _streams.cookie = cookieHeader;
     await _saveCookie(cookieHeader);
   }
 
   Future<void> logout() async {
     _library.clearCookie();
+    _streams.cookie = null;
     await _clearCookie();
   }
 

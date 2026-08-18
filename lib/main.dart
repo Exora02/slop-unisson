@@ -22,7 +22,7 @@ import 'ui/import_sheet.dart';
 import 'ui/library_screen.dart';
 import 'ui/mini_player.dart';
 
-const appBuildTag = 'v0.4.5-resolve';
+const appBuildTag = 'v0.4.6-ladder';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
