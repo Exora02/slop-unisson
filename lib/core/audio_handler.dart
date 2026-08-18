@@ -262,11 +262,7 @@ class UnissonAudioHandler extends BaseAudioHandler {
     final spec = await _resolveWithFallback(entry, gen);
     if (gen != _loadGen) return; // superseded by a newer skip/load
 
-    if (spec == null) {
-      _errorSubject.add(
-          'Could not play "${entry.track.title}" from any source');
-      return;
-    }
+    if (spec == null) return; // _resolveWithFallback emitted the reason
 
     final source = entry.sourceId ?? entry.track.bestSourceId;
     final track = entry.track.sources[source] ?? entry.track.sources.values.first;
@@ -336,7 +332,7 @@ class UnissonAudioHandler extends BaseAudioHandler {
   /// Try the preferred source first, then every other available source in
   /// priority order. Returns the first stream that resolves. Aborts early if
   /// a newer load has superseded this one, so a stuck source can't hang the
-  /// whole chain.
+  /// whole chain. On total failure, emits a diagnostic saying WHY.
   Future<StreamSpec?> _resolveWithFallback(QueueEntry entry, int gen) async {
     final preferred = entry.sourceId ?? entry.track.bestSourceId;
     final order = <String>[
@@ -345,8 +341,8 @@ class UnissonAudioHandler extends BaseAudioHandler {
         if (id != preferred && entry.track.sources.containsKey(id)) id,
     ];
     final pref = entry.qualityOverride ?? quality;
+    final attempts = <String>[];
 
-    String? lastError;
     for (final sourceId in order) {
       if (gen != _loadGen) return null; // superseded — stop trying
       final track = entry.track.sources[sourceId];
@@ -354,17 +350,27 @@ class UnissonAudioHandler extends BaseAudioHandler {
       final matches = library.providers
           .where((p) => p.id == sourceId && p.isConfigured);
       final provider = matches.isEmpty ? null : matches.first;
-      if (provider == null) continue;
+      if (provider == null) {
+        attempts.add('$sourceId: not configured');
+        continue;
+      }
       try {
+        // Keep this above the slowest provider's internal budget (YTM's
+        // ladder allows up to 20s per client call); snappiness comes from
+        // the generation interrupt, not from starving slow resolves.
         return await provider
             .resolveStream(track, pref)
-            .timeout(const Duration(seconds: 12));
+            .timeout(const Duration(seconds: 30));
+      } on TimeoutException {
+        attempts.add('$sourceId: timed out');
       } catch (e) {
-        lastError = '$sourceId: $e';
+        attempts.add('$sourceId: $e');
       }
     }
-    if (lastError != null && gen == _loadGen) {
-      _errorSubject.add('Resolve failed — $lastError');
+    if (gen == _loadGen) {
+      _errorSubject.add(attempts.isEmpty
+          ? 'Could not play "${entry.track.title}" — track has no sources'
+          : 'Could not play "${entry.track.title}" — ${attempts.join(' | ')}');
     }
     return null;
   }

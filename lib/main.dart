@@ -22,7 +22,7 @@ import 'ui/import_sheet.dart';
 import 'ui/library_screen.dart';
 import 'ui/mini_player.dart';
 
-const appBuildTag = 'v0.4.4-polish';
+const appBuildTag = 'v0.4.5-resolve';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
