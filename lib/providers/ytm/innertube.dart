@@ -25,8 +25,19 @@ class _Client {
   /// Attach the logged-in user's SAPISIDHASH auth when available.
   final bool auth;
 
+  /// Optional android device fields; some clients (ANDROID_VR) only
+  /// resolve when the context carries the exact device identity.
+  final String? deviceMake;
+  final String? deviceModel;
+  final String? osVersionOverride;
+
   const _Client(this.name, this.code, this.version, this.key, this.sdk,
-      this.userAgent, {this.lean = false, this.auth = false});
+      this.userAgent,
+      {this.lean = false,
+      this.auth = false,
+      this.deviceMake,
+      this.deviceModel,
+      this.osVersionOverride});
 }
 
 // Ladder verified live on 2026-08-18 against a failing videoId:
@@ -49,6 +60,11 @@ const _clients = [
   _Client('IOS', '5', '20.32.4', _androidKey, 0,
       'com.google.ios.youtube/20.32.4 (iPhone16,2; U; CPU iOS 18_6 like Mac OS X;)',
       lean: true),
+  // CANARY-MANAGED anonymous fallback: the ytm_ladder_canary cron rewrites
+  // this entry from yt-dlp's current working spec when it rots.
+  _Client('ANDROID_VR', '28', '1.65.10', _androidKey, 32,
+      'com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip',
+      deviceMake: 'Oculus', deviceModel: 'Quest 3', osVersionOverride: '12L'),
 ];
 
 const _preferredItags = [251, 250, 140];
@@ -156,7 +172,9 @@ class InnerTubeClient {
             'clientVersion': c.version,
             'androidSdkVersion': c.sdk,
             'osName': 'Android',
-            'osVersion': c.sdk >= 34 ? '14' : '13',
+            'osVersion': c.osVersionOverride ?? (c.sdk >= 34 ? '14' : '13'),
+            if (c.deviceMake != null) 'deviceMake': c.deviceMake,
+            if (c.deviceModel != null) 'deviceModel': c.deviceModel,
             'platform': 'MOBILE',
             'hl': 'en',
             'gl': 'US',
