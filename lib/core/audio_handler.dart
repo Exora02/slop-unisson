@@ -32,6 +32,13 @@ class UnissonAudioHandler extends BaseAudioHandler {
   Stream<bool> get shuffleStream => _shuffleSubject.stream;
   Stream<String> get errorStream => _errorSubject.stream;
 
+  /// The entry currently loaded/playing (for the player UI).
+  Stream<QueueEntry?> get currentEntryStream => Rx.combineLatest2(
+      queueStream,
+      indexStream,
+      (List<QueueEntry> q, int i) =>
+          i >= 0 && i < q.length ? q[i] : null);
+
   Stream<Duration> get positionStream => _player.positionStream;
   Stream<Duration?> get durationStream => _player.durationStream;
   Stream<bool> get playingStream => _player.playingStream;
@@ -47,6 +54,16 @@ class UnissonAudioHandler extends BaseAudioHandler {
           });
 
   UnissonQueue get unissonQueue => _queue;
+
+  /// Monotonic guard: every load bumps it; a load whose generation is no
+  /// longer current after an await was superseded (fast skip taps) and must
+  /// abandon its result instead of clobbering the newer track.
+  int _loadGen = 0;
+
+  /// Position ticks fire ~4x/s; only broadcast playback state to the
+  /// platform channel once per second (event-driven broadcasts stay
+  /// immediate). Constant churn here made the UI feel laggy.
+  DateTime _lastPosBroadcast = DateTime.fromMillisecondsSinceEpoch(0);
 
   UnissonAudioHandler({required this.library}) {
     _init();
@@ -70,7 +87,13 @@ class UnissonAudioHandler extends BaseAudioHandler {
       _broadcastState();
     });
     _player.playingStream.listen((_) => _broadcastState());
-    _player.positionStream.listen((_) => _broadcastState());
+    _player.positionStream.listen((_) {
+      final now = DateTime.now();
+      if (now.difference(_lastPosBroadcast).inMilliseconds >= 1000) {
+        _lastPosBroadcast = now;
+        _broadcastState();
+      }
+    });
     _player.durationStream.listen((_) => _broadcastState());
   }
 
@@ -189,11 +212,25 @@ class UnissonAudioHandler extends BaseAudioHandler {
 
   // ---------- resolution + loading ----------
 
+  /// Change the current track's source (and optionally quality) and reload.
+  Future<void> switchSource(String sourceId, {QualityPref? qualityPref}) async {
+    final entry = _queue.current;
+    if (entry == null) return;
+    entry.sourceId = sourceId;
+    if (qualityPref != null) entry.qualityOverride = qualityPref;
+    _broadcastQueue();
+    await _loadCurrent(autoplay: _player.playing);
+  }
+
   Future<void> _loadCurrent({required bool autoplay}) async {
     final entry = _queue.current;
     if (entry == null) return;
 
+    final gen = ++_loadGen;
+
     final spec = await _resolveWithFallback(entry);
+    if (gen != _loadGen) return; // superseded by a newer skip/load
+
     if (spec == null) {
       _errorSubject.add(
           'Could not play "${entry.track.title}" from any source');
@@ -209,8 +246,10 @@ class UnissonAudioHandler extends BaseAudioHandler {
         AudioSource.uri(spec.uri),
         preload: true,
       );
+      if (gen != _loadGen) return;
       if (autoplay) await _player.play();
     } catch (e) {
+      if (gen != _loadGen) return;
       _errorSubject.add('Playback error: $e');
     }
   }
@@ -224,6 +263,7 @@ class UnissonAudioHandler extends BaseAudioHandler {
       for (final id in const ['local', 'qobuz', 'ytm', 'tidal', 'spotify'])
         if (id != preferred && entry.track.sources.containsKey(id)) id,
     ];
+    final pref = entry.qualityOverride ?? quality;
 
     String? lastError;
     for (final sourceId in order) {
@@ -235,7 +275,7 @@ class UnissonAudioHandler extends BaseAudioHandler {
       if (provider == null) continue;
       try {
         return await provider
-            .resolveStream(track, quality)
+            .resolveStream(track, pref)
             .timeout(const Duration(seconds: 20));
       } catch (e) {
         lastError = '$sourceId: $e';
@@ -289,7 +329,12 @@ class UnissonAudioHandler extends BaseAudioHandler {
       album: merged.album,
       artUri: merged.artwork != null ? Uri.parse(merged.artwork!) : null,
       duration: spec.expiresAt != null ? null : (source.duration ?? merged.duration),
-      extras: {'sourceId': source.providerId},
+      extras: {
+        'sourceId': source.providerId,
+        if (spec.bitrate != null) 'bitrate': spec.bitrate,
+        if (spec.sampleRate != null) 'sampleRate': spec.sampleRate,
+        if (spec.bitDepth != null) 'bitDepth': spec.bitDepth,
+      },
     );
   }
 

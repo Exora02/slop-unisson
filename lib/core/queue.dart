@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'library_service.dart';
+import 'models.dart';
 
 enum RepeatMode { none, all, one }
 
@@ -11,7 +12,10 @@ class QueueEntry {
   /// providerId to play from (null = auto best source at resolve time)
   String? sourceId;
 
-  QueueEntry({required this.track, this.sourceId});
+  /// Per-track quality override (null = use the global preference).
+  QualityPref? qualityOverride;
+
+  QueueEntry({required this.track, this.sourceId, this.qualityOverride});
 
   String get key => '${track.universalKey}|${sourceId ?? 'auto'}';
 }

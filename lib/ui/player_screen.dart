@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart' hide RepeatMode;
 import 'package:audio_service/audio_service.dart';
 
+import '../core/artwork.dart';
 import '../core/audio_handler.dart';
+import '../core/models.dart';
 import '../core/queue.dart';
 import 'queue_sheet.dart';
 
@@ -46,7 +48,9 @@ class PlayerScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 24),
                   _TrackInfo(item: item),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 8),
+                  _SourceChip(handler: handler, item: item),
+                  const SizedBox(height: 12),
                   _SeekBar(handler: handler),
                   const SizedBox(height: 8),
                   _Controls(handler: handler),
@@ -84,15 +88,22 @@ class _Artwork extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final url = item?.artUri?.toString();
     return AspectRatio(
       aspectRatio: 1,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(12),
-        child: item?.artUri != null
+        child: url != null
             ? Image.network(
-                item!.artUri.toString(),
+                hqArtwork(url),
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => _fallback(theme),
+                // Some covers have no large cut — fall back to the
+                // original (smaller) URL instead of an error icon.
+                errorBuilder: (_, __, ___) => Image.network(
+                  url,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => _fallback(theme),
+                ),
               )
             : _fallback(theme),
       ),
@@ -106,6 +117,168 @@ class _Artwork extends StatelessWidget {
               size: 96, color: theme.colorScheme.primary),
         ),
       );
+}
+
+/// Compact chip under the track info: current source + resolved quality.
+/// Tap opens a sheet to switch source or pick a quality for this track.
+class _SourceChip extends StatelessWidget {
+  final UnissonAudioHandler handler;
+  final MediaItem? item;
+
+  const _SourceChip({required this.handler, this.item});
+
+  static const _labels = {
+    'local': 'Local',
+    'qobuz': 'Qobuz',
+    'ytm': 'YouTube',
+    'tidal': 'Tidal',
+    'spotify': 'Spotify',
+  };
+
+  String _qualityText(Map<String, dynamic>? extras) {
+    if (extras == null) return '';
+    final sr = (extras['sampleRate'] as num?)?.toInt();
+    final bd = (extras['bitDepth'] as num?)?.toInt();
+    if (sr != null && bd != null && bd >= 16) {
+      return '${bd}bit/${(sr / 1000).toStringAsFixed(sr % 1000 == 0 ? 0 : 1)}kHz';
+    }
+    final br = (extras['bitrate'] as num?)?.toInt();
+    if (br != null) return '${(br / 1000).round()}kbps';
+    return '';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final extras = item?.extras;
+    final sourceId = extras?['sourceId'] as String?;
+    if (sourceId == null) return const SizedBox.shrink();
+
+    final label = _labels[sourceId] ?? sourceId;
+    final q = _qualityText(extras);
+
+    return GestureDetector(
+      onTap: () => _openSourceSheet(context),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.swap_horiz,
+                size: 16, color: theme.colorScheme.onSurfaceVariant),
+            const SizedBox(width: 6),
+            Text(
+              q.isEmpty ? label : '$label · $q',
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _openSourceSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
+      builder: (_) => _SourceSheet(handler: handler, item: item),
+    );
+  }
+}
+
+class _SourceSheet extends StatelessWidget {
+  final UnissonAudioHandler handler;
+  final MediaItem? item;
+
+  const _SourceSheet({required this.handler, this.item});
+
+  static const _labels = {
+    'local': 'Local file',
+    'qobuz': 'Qobuz',
+    'ytm': 'YouTube Music',
+    'tidal': 'Tidal',
+    'spotify': 'Spotify',
+  };
+
+  static const _qualityLabels = {
+    QualityPref.highest: 'Highest (hi-res / lossless)',
+    QualityPref.balanced: 'Balanced',
+    QualityPref.lowest: 'Lowest data',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final currentSourceId = item?.extras?['sourceId'] as String?;
+
+    return StreamBuilder<QueueEntry?>(
+      stream: handler.currentEntryStream,
+      builder: (context, entrySnap) {
+        final entry = entrySnap.data;
+        if (entry == null) {
+          return const SizedBox(
+              height: 120, child: Center(child: Text('Nothing playing')));
+        }
+        final sources = entry.track.sources;
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Play from',
+                    style: theme.textTheme.titleMedium
+                        ?.copyWith(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                for (final sourceId in sources.keys)
+                  RadioListTile<String>(
+                    dense: true,
+                    title: Text(_labels[sourceId] ?? sourceId),
+                    subtitle: sourceId == 'qobuz'
+                        ? const Text('hi-res up to 24bit/192kHz')
+                        : null,
+                    value: sourceId,
+                    groupValue: currentSourceId,
+                    onChanged: (v) {
+                      if (v != null) handler.switchSource(v);
+                      Navigator.of(context).pop();
+                    },
+                  ),
+                const SizedBox(height: 4),
+                Text('Quality for this track',
+                    style: theme.textTheme.titleMedium
+                        ?.copyWith(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                for (final pref in QualityPref.values)
+                  RadioListTile<QualityPref>(
+                    dense: true,
+                    title: Text(_qualityLabels[pref]!),
+                    value: pref,
+                    groupValue: entry.qualityOverride ?? handler.quality,
+                    onChanged: (v) {
+                      if (v == null) return;
+                      // Re-resolve the current source with the new quality;
+                      // if none was pinned, pin the best available one.
+                      handler.switchSource(
+                        currentSourceId ?? entry.track.bestSourceId,
+                        qualityPref: v,
+                      );
+                      Navigator.of(context).pop();
+                    },
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
 }
 
 class _TrackInfo extends StatelessWidget {
