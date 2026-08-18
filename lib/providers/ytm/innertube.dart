@@ -60,7 +60,7 @@ const _clients = [
   _Client('IOS', '5', '20.32.4', _androidKey, 0,
       'com.google.ios.youtube/20.32.4 (iPhone16,2; U; CPU iOS 18_6 like Mac OS X;)',
       lean: true),
-  // CANARY-MANAGED anonymous fallback: the ytm_ladder_canary cron rewrites
+    // CANARY-MANAGED anonymous fallback: the ytm_ladder_canary cron rewrites
   // this entry from yt-dlp's current working spec when it rots.
   _Client('ANDROID_VR', '28', '1.65.10', _androidKey, 32,
       'com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip',
