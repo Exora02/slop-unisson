@@ -27,9 +27,9 @@ class ImportSheet extends StatefulWidget {
 class _ImportSheetState extends State<ImportSheet> {
   late final Future<List<ImportablePlaylist>> _future;
   final _importing = <String>{};
-  final _done = <String, int>{};
+  final _done = <String, ImportResult>{};
   bool _importingFavs = false;
-  final _favDone = <String, int>{};
+  final _favDone = <String, ImportResult>{};
 
   @override
   void initState() {
@@ -44,11 +44,11 @@ class _ImportSheetState extends State<ImportSheet> {
     if (_importing.contains(key)) return;
     setState(() => _importing.add(key));
     try {
-      final n = await widget.importer.importPlaylist(p);
+      final r = await widget.importer.importPlaylist(p);
       if (mounted) {
         setState(() {
           _importing.remove(key);
-          _done[key] = n;
+          _done[key] = r;
         });
       }
     } catch (e) {
@@ -65,11 +65,11 @@ class _ImportSheetState extends State<ImportSheet> {
     if (_importingFavs) return;
     setState(() => _importingFavs = true);
     try {
-      final n = await widget.importer.importFavorites(providerId);
+      final r = await widget.importer.importFavorites(providerId);
       if (mounted) {
         setState(() {
           _importingFavs = false;
-          _favDone[providerId] = n;
+          _favDone[providerId] = r;
         });
       }
     } catch (e) {
@@ -154,7 +154,7 @@ class _ImportSheetState extends State<ImportSheet> {
                     ),
                     subtitle: Text(
                       '${p.providerId}${p.count != null ? ' · ${p.count} tracks' : ''}'
-                      '${imported != null ? ' · imported $imported' : ''}',
+                      '${imported != null ? ' · fetched ${imported.fetched}, added ${imported.added}' : ''}',
                     ),
                     trailing: busy
                         ? const SizedBox(
@@ -185,7 +185,9 @@ class _ImportSheetState extends State<ImportSheet> {
     return ListTile(
       leading: const Icon(Icons.favorite),
       title: Text(label),
-      subtitle: imported != null ? Text('imported $imported') : null,
+      subtitle: imported != null
+          ? Text('fetched ${imported.fetched}, added ${imported.added}')
+          : null,
       trailing: busy
           ? const SizedBox(
               width: 24,

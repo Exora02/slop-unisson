@@ -169,37 +169,32 @@ class YtmLibraryClient {
     final out = <Track>[];
     final seen = <String>{};
 
-    // Initial page lives in a playlist shelf; continuations come back in
-    // a different structure, so collect items generically from each page.
+    // Initial page lives in a playlist shelf; the continuation token sits
+    // in the LAST item of the contents list (continuationItemRenderer).
     final shelf = _find(j, 'musicPlaylistShelfRenderer') ??
         _find(j, 'musicShelfRenderer');
-    String? continuation = shelf is Map
-        ? _continuationOf(shelf)
-        : _findContinuation(j);
-    final firstContents = shelf is Map ? shelf['contents'] as List? : null;
-    _collectTracks(firstContents, out, seen);
+    var items = shelf is Map ? shelf['contents'] as List? : null;
+    _collectTracks(items, out, seen);
+    var token = _continuationToken(items);
 
     var pages = 0;
-    while (continuation != null && pages < 200) {
+    while (token != null && pages < 200) {
       pages++;
-      final cj = await _continue(continuation);
-      final pageItems = _find(cj, 'musicPlaylistShelfContinuation') ??
-          _find(cj, 'musicShelfContinuation') ??
-          _find(cj, 'contents');
-      final contents = pageItems is Map
-          ? pageItems['contents'] as List?
-          : pageItems is List
-              ? pageItems
-              : null;
-      if (contents == null || contents.isEmpty) break;
+      final cj = await _continue(token);
+      // Continuation responses wrap new items in
+      // onResponseReceivedActions[0].appendContinuationItemsAction
+      // .continuationItems
+      final appended = _find(cj, 'appendContinuationItemsAction');
+      final newItems = appended is Map
+          ? appended['continuationItems'] as List?
+          : _find(cj, 'continuationItems') as List?;
+      if (newItems == null || newItems.isEmpty) break;
       final before = out.length;
-      _collectTracks(contents, out, seen);
-      final next = pageItems is Map
-          ? _continuationOf(pageItems)
-          : _findContinuation(cj);
+      _collectTracks(newItems, out, seen);
+      final next = _continuationToken(newItems);
       // Stop if the page added nothing new and offers no continuation.
       if (out.length == before && next == null) break;
-      continuation = next;
+      token = next;
     }
     return out;
   }
@@ -215,20 +210,40 @@ class YtmLibraryClient {
     }
   }
 
-  /// continuationItemRenderer token inside a renderer's contents/continuations.
-  String? _continuationOf(Map renderer) {
-    final token = _find(renderer, 'continuationCommand');
-    if (token is Map) return token['token'] as String?;
+  /// The continuation token lives in the LAST item of a contents list as a
+  /// continuationItemRenderer (ytmusicapi's get_continuation_token). The
+  /// endpoint can be nested under a commandExecutorCommand list instead.
+  String? _continuationToken(List? items) {
+    if (items == null || items.isEmpty) return null;
+    final last = items.last;
+    if (last is! Map) return null;
+    final renderer = last['continuationItemRenderer'];
+    if (renderer is! Map) return null;
+    final endpoint = renderer['continuationEndpoint'];
+    if (endpoint is! Map) return null;
+    final cmd = endpoint['continuationCommand'];
+    if (cmd is Map && cmd['token'] is String) return cmd['token'] as String;
+    final executor = endpoint['commandExecutorCommand'];
+    if (executor is Map) {
+      final commands = executor['commands'];
+      if (commands is List) {
+        for (final c in commands) {
+          if (c is Map) {
+            final cc = c['continuationCommand'];
+            if (cc is Map &&
+                cc['request'] == 'CONTINUATION_REQUEST_TYPE_BROWSE' &&
+                cc['token'] is String) {
+              return cc['token'] as String;
+            }
+          }
+        }
+      }
+    }
     return null;
   }
 
-  String? _findContinuation(dynamic node) {
-    final cmd = _find(node, 'continuationCommand');
-    if (cmd is Map) return cmd['token'] as String?;
-    return null;
-  }
-
-  /// InnerTube /next with a continuation token.
+  /// InnerTube continuation fetch: POST /browse with ONLY the token body
+  /// (ytmusicapi sends the same browse endpoint with ctoken params).
   Future<Map<String, dynamic>> _continue(String token) async {
     if (!isLoggedIn) throw StateError('YTM not logged in');
     final body = {
@@ -245,7 +260,7 @@ class YtmLibraryClient {
     };
     final resp = await _http
         .post(
-          Uri.parse('$ytmApiBase/next?key=$ytmWebKey&alt=json'),
+          Uri.parse('$ytmApiBase/browse?key=$ytmWebKey&alt=json'),
           headers: {
             'User-Agent': ytmUserAgent,
             'Content-Type': 'application/json',
@@ -259,7 +274,7 @@ class YtmLibraryClient {
         )
         .timeout(const Duration(seconds: 25));
     if (resp.statusCode >= 400) {
-      throw Exception('YTM next HTTP ${resp.statusCode}');
+      throw Exception('YTM continuation HTTP ${resp.statusCode}');
     }
     return jsonDecode(resp.body) as Map<String, dynamic>;
   }

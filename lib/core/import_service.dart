@@ -22,6 +22,13 @@ class ImportablePlaylist {
   });
 }
 
+/// Outcome of one import run.
+class ImportResult {
+  final int fetched;
+  final int added;
+  const ImportResult({required this.fetched, required this.added});
+}
+
 /// Imports playlists and favorites from Qobuz/YTM into the local library.
 class ImportService {
   final QobuzProvider? qobuz;
@@ -76,10 +83,10 @@ class ImportService {
   }
 
   /// Import a remote playlist as a local Unisson playlist.
-  /// Returns the number of tracks imported.
-  Future<int> importPlaylist(ImportablePlaylist source) async {
+  /// Returns how many tracks were fetched vs newly added (dedupe-aware).
+  Future<ImportResult> importPlaylist(ImportablePlaylist source) async {
     final tracks = await _fetchTracks(source);
-    if (tracks.isEmpty) return 0;
+    if (tracks.isEmpty) return const ImportResult(fetched: 0, added: 0);
 
     // Reuse an existing local playlist with the same name so re-imports
     // top up truncated playlists instead of creating duplicates
@@ -105,11 +112,11 @@ class ImportService {
       );
       if (await store.addToPlaylist(local.id, merged)) added++;
     }
-    return added;
+    return ImportResult(fetched: tracks.length, added: added);
   }
 
   /// Import all favorited tracks of a provider as favorites.
-  Future<int> importFavorites(String providerId) async {
+  Future<ImportResult> importFavorites(String providerId) async {
     final tracks = providerId == 'qobuz'
         ? await _fetchQobuzFavorites()
         : await _fetchYtmLiked();
@@ -129,7 +136,7 @@ class ImportService {
         added++;
       }
     }
-    return added;
+    return ImportResult(fetched: tracks.length, added: added);
   }
 
   Future<List<Track>> _fetchTracks(ImportablePlaylist source) async {
