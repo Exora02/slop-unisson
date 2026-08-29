@@ -2,6 +2,7 @@ import '../core/library_service.dart';
 import '../core/library_store.dart';
 import '../core/models.dart';
 import '../providers/qobuz/qobuz_provider.dart';
+import '../providers/spotify/spotify_provider.dart';
 import '../providers/ytm/ytm_provider.dart';
 
 /// A remote playlist offered for import.
@@ -32,9 +33,11 @@ class ImportResult {
 class ImportService {
   final QobuzProvider? qobuz;
   final YtmProvider ytm;
+  final SpotifyProvider? spotify;
   final LibraryStore store;
 
-  ImportService({this.qobuz, required this.ytm, required this.store});
+  ImportService(
+      {this.qobuz, required this.ytm, this.spotify, required this.store});
 
   /// All playlists available for import across connected providers.
   Future<List<ImportablePlaylist>> listImportablePlaylists() async {
@@ -73,6 +76,27 @@ class ImportService {
           providerId: 'ytm',
           remoteId: 'LM',
           title: 'Liked Music',
+          count: null,
+        ));
+      } catch (_) {}
+    }
+
+    if (spotify != null && spotify!.isConfigured) {
+      try {
+        final playlists = await spotify!.api.getMyPlaylists();
+        for (final p in playlists) {
+          out.add(ImportablePlaylist(
+            providerId: 'spotify',
+            remoteId: p.id,
+            title: p.name,
+            artwork: p.artwork,
+            count: p.tracksCount,
+          ));
+        }
+        out.add(const ImportablePlaylist(
+          providerId: 'spotify',
+          remoteId: 'liked',
+          title: 'Liked Songs',
           count: null,
         ));
       } catch (_) {}
@@ -118,7 +142,9 @@ class ImportService {
   Future<ImportResult> importFavorites(String providerId) async {
     final tracks = providerId == 'qobuz'
         ? await _fetchQobuzFavorites()
-        : await _fetchYtmLiked();
+        : providerId == 'spotify'
+            ? await _fetchSpotifyLiked()
+            : await _fetchYtmLiked();
     var added = 0;
     for (final t in tracks) {
       final merged = MergedTrack(
@@ -157,7 +183,35 @@ class ImportService {
               ))
           .toList();
     }
+    if (source.providerId == 'spotify') {
+      return _fetchSpotifyTracks(source);
+    }
     return ytm.libraryClient.getPlaylistTracks(source.remoteId);
+  }
+
+  Future<List<Track>> _fetchSpotifyLiked() => _fetchSpotifyTracks(
+      const ImportablePlaylist(
+          providerId: 'spotify', remoteId: 'liked', title: 'Liked Songs'));
+
+  Future<List<Track>> _fetchSpotifyTracks(ImportablePlaylist source) async {
+    final api = spotify!.api;
+    final raw = source.remoteId == 'liked'
+        ? await api.getLikedTracks()
+        : await api.getPlaylistTracks(source.remoteId);
+    return raw
+        .map((t) => Track(
+              providerId: 'spotify',
+              id: 'spotify:${t.id}',
+              title: t.title,
+              artists: t.artists,
+              album: t.album,
+              duration: t.durationMs != null
+                  ? Duration(milliseconds: t.durationMs!)
+                  : null,
+              artwork: t.artwork,
+              isrc: t.isrc,
+            ))
+        .toList();
   }
 
   Future<List<Track>> _fetchQobuzFavorites() async {

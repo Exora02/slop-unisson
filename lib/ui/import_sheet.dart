@@ -92,7 +92,7 @@ class _ImportSheetState extends State<ImportSheet> {
             children: [
               Icon(Icons.download),
               SizedBox(width: 8),
-              Text('Import from Qobuz / YTM',
+              Text('Import playlists & favorites',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             ],
           ),
@@ -101,6 +101,9 @@ class _ImportSheetState extends State<ImportSheet> {
           _favTile('qobuz', 'Qobuz favorites'),
         if (widget.importer.ytm.isLoggedIn)
           _favTile('ytm', 'YTM liked songs'),
+        if (widget.importer.spotify != null &&
+            widget.importer.spotify!.isConfigured)
+          _favTile('spotify', 'Spotify liked songs'),
         const Divider(height: 1),
         Expanded(
           child: FutureBuilder<List<ImportablePlaylist>>(
@@ -117,9 +120,11 @@ class _ImportSheetState extends State<ImportSheet> {
                     child: Text(
                       widget.importer.ytm.isLoggedIn ||
                               (widget.importer.qobuz != null &&
-                                  widget.importer.qobuz!.isConfigured)
+                                  widget.importer.qobuz!.isConfigured) ||
+                              (widget.importer.spotify != null &&
+                                  widget.importer.spotify!.isConfigured)
                           ? 'No remote playlists found.'
-                          : 'Connect Qobuz or YTM first.',
+                          : 'Connect Qobuz, YTM or Spotify first.',
                       textAlign: TextAlign.center,
                     ),
                   ),

@@ -16,13 +16,16 @@ import 'core/queue.dart';
 import 'providers/local/local_provider.dart';
 import 'providers/qobuz/qobuz_provider.dart';
 import 'providers/qobuz/qobuz_login_screen.dart';
+import 'providers/spotify/spotify_provider.dart';
+import 'providers/spotify/spotify_api.dart';
+import 'providers/spotify/spotify_login_screen.dart';
 import 'providers/ytm/ytm_provider.dart';
 import 'providers/ytm/ytm_login_screen.dart';
 import 'ui/import_sheet.dart';
 import 'ui/library_screen.dart';
 import 'ui/mini_player.dart';
 
-const appBuildTag = 'v0.4.7-ladder';
+const appBuildTag = 'v0.5.0-spotify';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -94,6 +97,7 @@ class _HomeScreenState extends State<HomeScreen> {
   late final YtmProvider _ytm;
   late final LocalProvider? _local;
   late final QobuzProvider _qobuz;
+  late final SpotifyProvider _spotify;
   late final Future<UnissonAudioHandler> _handlerFuture;
   late final Future<LibraryStore> _storeFuture;
 
@@ -121,10 +125,19 @@ class _HomeScreenState extends State<HomeScreen> {
       clearToken: () => _secure.delete(key: 'qobuz_token'),
     );
     _qobuz.restoreSession();
+    _spotify = SpotifyProvider(
+      api: SpotifyApi(
+        loadToken: () => _secure.read(key: 'spotify_token'),
+        saveToken: (t) => _secure.write(key: 'spotify_token', value: t),
+        clearToken: () => _secure.delete(key: 'spotify_token'),
+      ),
+    );
+    _spotify.restoreSession();
     _providers = [
       if (_local != null) _local,
       _qobuz,
       _ytm,
+      _spotify,
     ];
     _library = LibraryService(_providers);
     _storeFuture = LibraryStore.open();
@@ -160,6 +173,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _ytm.dispose();
     _local?.dispose();
     _qobuz.dispose();
+    _spotify.dispose();
     _controller.dispose();
     _storeFuture.then((s) => s.close());
     super.dispose();
@@ -192,11 +206,28 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) setState(() {});
   }
 
+  Future<void> _connectSpotify() async {
+    final ok = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => SpotifyLoginScreen(
+          onCode: (code, verifier) => _spotify.api.exchangeCode(code, verifier),
+        ),
+      ),
+    );
+    if (ok == true && mounted) setState(() {});
+  }
+
+  Future<void> _disconnectSpotify() async {
+    await _spotify.logout();
+    if (mounted) setState(() {});
+  }
+
   Future<void> _openImport() async {
     final store = await _storeFuture;
     final importer = ImportService(
       qobuz: _qobuz.isConfigured ? _qobuz : null,
       ytm: _ytm,
+      spotify: _spotify.isConfigured ? _spotify : null,
       store: store,
     );
     if (!mounted) return;
@@ -275,6 +306,8 @@ class _HomeScreenState extends State<HomeScreen> {
               if (value == 'qobuz_logout') _disconnectQobuz();
               if (value == 'ytm_login') _connectYtm();
               if (value == 'ytm_logout') _disconnectYtm();
+              if (value == 'spotify_login') _connectSpotify();
+              if (value == 'spotify_logout') _disconnectSpotify();
               if (value == 'import') _openImport();
               if (value == 'quality_highest') setState(() => _quality = QualityPref.highest);
               if (value == 'quality_balanced') setState(() => _quality = QualityPref.balanced);
@@ -317,6 +350,25 @@ class _HomeScreenState extends State<HomeScreen> {
                     dense: true,
                     leading: Icon(Icons.logout, color: Colors.red),
                     title: Text('Disconnect YouTube Music'),
+                  ),
+                ),
+              if (!_spotify.isConfigured)
+                const PopupMenuItem(
+                  value: 'spotify_login',
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.login, color: Color(0xFF1DB954)),
+                    title: Text('Connect Spotify'),
+                    subtitle: Text('import playlists & liked songs'),
+                  ),
+                )
+              else
+                const PopupMenuItem(
+                  value: 'spotify_logout',
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.logout, color: Colors.red),
+                    title: Text('Disconnect Spotify'),
                   ),
                 ),
               const PopupMenuItem(

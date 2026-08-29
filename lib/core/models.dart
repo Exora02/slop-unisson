@@ -11,6 +11,9 @@ class Track {
   final int? bitrate;
   final int? sampleRate;
   final int? bitDepth;
+  /// ISRC recording identifier, when the source exposes one (Spotify
+  /// does). Reserved for future cross-source matching beyond title|artist.
+  final String? isrc;
 
   const Track({
     required this.providerId,
@@ -23,6 +26,7 @@ class Track {
     this.bitrate,
     this.sampleRate,
     this.bitDepth,
+    this.isrc,
   });
 }
 

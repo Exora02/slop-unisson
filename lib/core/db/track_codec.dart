@@ -45,6 +45,7 @@ Map<String, dynamic> trackToJson(Track t) => {
       'bitrate': t.bitrate,
       'sampleRate': t.sampleRate,
       'bitDepth': t.bitDepth,
+      'isrc': t.isrc,
     };
 
 Track trackFromJson(Map<String, dynamic> j) => Track(
@@ -62,4 +63,5 @@ Track trackFromJson(Map<String, dynamic> j) => Track(
       bitrate: (j['bitrate'] as num?)?.toInt(),
       sampleRate: (j['sampleRate'] as num?)?.toInt(),
       bitDepth: (j['bitDepth'] as num?)?.toInt(),
+      isrc: j['isrc'] as String?,
     );
