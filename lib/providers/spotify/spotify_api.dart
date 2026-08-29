@@ -3,15 +3,10 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
-/// Public client id of the open.spotify.com web player. Public
-/// client-side material (same category as the InnerTube keys), not a
-/// secret. Spotify's authorization flow requires *some* registered
-/// client id; the web player's is the standard choice for PKCE flows.
-const spotifyClientId = '65b708073fc0480ea92a077233ca87bd';
-
-/// Must match a redirect registered for the client id. The web player
-/// origin accepts itself.
-const spotifyRedirectUri = 'https://open.spotify.com/';
+/// Redirect the WebView intercepts before it ever loads. A custom
+/// scheme needs no server, and the user registers it verbatim in
+/// their Spotify app settings, so it always matches.
+const spotifyRedirectUri = 'unisson://callback';
 
 const _tokenEndpoint = 'https://accounts.spotify.com/api/token';
 const _apiBase = 'https://api.spotify.com/v1';
@@ -67,6 +62,11 @@ SpotifyTrack spotifyTrackFromJson(Map<String, dynamic> m) {
 }
 
 class SpotifyApi {
+  /// The user's own Spotify app client id (Spotify rejects borrowed
+  /// ids with "redirect_uri not matching"). Same id must be used for
+  /// exchange and refresh; loaded from secure storage at startup.
+  String? clientId;
+
   final Future<String?> Function() loadToken;
   final Future<void> Function(String) saveToken;
   final Future<void> Function() clearToken;
@@ -96,11 +96,13 @@ class SpotifyApi {
   }
 
   Future<void> exchangeCode(String code, String verifier) async {
+    final cid = clientId;
+    if (cid == null) throw StateError('Spotify client id not configured');
     final resp = await _http.post(Uri.parse(_tokenEndpoint), body: {
       'grant_type': 'authorization_code',
       'code': code,
       'redirect_uri': spotifyRedirectUri,
-      'client_id': spotifyClientId,
+      'client_id': cid,
       'code_verifier': verifier,
     });
     if (resp.statusCode != 200) {
@@ -132,10 +134,12 @@ class SpotifyApi {
     if (_access == null) throw StateError('Spotify not connected');
     if (DateTime.now().millisecondsSinceEpoch < _expiresAtMs) return;
     if (_refresh == null) throw StateError('Spotify token expired');
+    final cid = clientId;
+    if (cid == null) throw StateError('Spotify client id not configured');
     final resp = await _http.post(Uri.parse(_tokenEndpoint), body: {
       'grant_type': 'refresh_token',
       'refresh_token': _refresh,
-      'client_id': spotifyClientId,
+      'client_id': cid,
     });
     if (resp.statusCode != 200) {
       throw StateError('Spotify token refresh failed: HTTP ${resp.statusCode}');

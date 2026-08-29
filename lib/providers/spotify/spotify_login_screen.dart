@@ -8,13 +8,16 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'spotify_api.dart';
 
 /// WebView-based Spotify login using the authorization-code flow with
-/// PKCE. The user signs in on accounts.spotify.com; the redirect back
-/// to open.spotify.com is intercepted and the `code` parameter is
-/// exchanged with the stored verifier.
+/// PKCE. The user signs in on accounts.spotify.com; the redirect to
+/// the custom scheme (registered in their own Spotify app settings)
+/// is intercepted and the `code` parameter is exchanged with the
+/// stored verifier.
 class SpotifyLoginScreen extends StatefulWidget {
+  final String clientId;
   final Future<void> Function(String code, String verifier) onCode;
 
-  const SpotifyLoginScreen({super.key, required this.onCode});
+  const SpotifyLoginScreen(
+      {super.key, required this.clientId, required this.onCode});
 
   @override
   State<SpotifyLoginScreen> createState() => _SpotifyLoginScreenState();
@@ -34,7 +37,7 @@ class _SpotifyLoginScreenState extends State<SpotifyLoginScreen> {
     _challenge = base64UrlEncode(sha256.convert(utf8.encode(_verifier)).bytes)
         .replaceAll('=', '');
     final url = 'https://accounts.spotify.com/authorize'
-        '?client_id=$spotifyClientId'
+        '?client_id=${Uri.encodeComponent(widget.clientId)}'
         '&response_type=code'
         '&redirect_uri=${Uri.encodeComponent(spotifyRedirectUri)}'
         '&scope=${Uri.encodeComponent('playlist-read-private user-library-read')}'
