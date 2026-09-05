@@ -61,12 +61,13 @@ SpotifyTrack spotifyTrackFromJson(Map<String, dynamic> m) {
   );
 }
 
-class SpotifyApi {
-  /// The user's own Spotify app client id (Spotify rejects borrowed
-  /// ids with "redirect_uri not matching"). Same id must be used for
-  /// exchange and refresh; loaded from secure storage at startup.
-  String? clientId;
+/// Client id of the Unisson app registered on the Spotify developer
+/// dashboard (redirect unisson://callback). Public client material —
+/// baked in like the InnerTube keys; PKCE keeps the flow secret-free,
+/// so end users only ever see a login screen.
+const spotifyClientId = '2354f17b09244bfb82e1dff610039b8f';
 
+class SpotifyApi {
   final Future<String?> Function() loadToken;
   final Future<void> Function(String) saveToken;
   final Future<void> Function() clearToken;
@@ -96,13 +97,11 @@ class SpotifyApi {
   }
 
   Future<void> exchangeCode(String code, String verifier) async {
-    final cid = clientId;
-    if (cid == null) throw StateError('Spotify client id not configured');
     final resp = await _http.post(Uri.parse(_tokenEndpoint), body: {
       'grant_type': 'authorization_code',
       'code': code,
       'redirect_uri': spotifyRedirectUri,
-      'client_id': cid,
+      'client_id': spotifyClientId,
       'code_verifier': verifier,
     });
     if (resp.statusCode != 200) {
@@ -134,12 +133,10 @@ class SpotifyApi {
     if (_access == null) throw StateError('Spotify not connected');
     if (DateTime.now().millisecondsSinceEpoch < _expiresAtMs) return;
     if (_refresh == null) throw StateError('Spotify token expired');
-    final cid = clientId;
-    if (cid == null) throw StateError('Spotify client id not configured');
     final resp = await _http.post(Uri.parse(_tokenEndpoint), body: {
       'grant_type': 'refresh_token',
       'refresh_token': _refresh,
-      'client_id': cid,
+      'client_id': spotifyClientId,
     });
     if (resp.statusCode != 200) {
       throw StateError('Spotify token refresh failed: HTTP ${resp.statusCode}');

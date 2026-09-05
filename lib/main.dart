@@ -25,7 +25,7 @@ import 'ui/import_sheet.dart';
 import 'ui/library_screen.dart';
 import 'ui/mini_player.dart';
 
-const appBuildTag = 'v0.5.1-spotify';
+const appBuildTag = 'v0.5.2-spotify';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -132,10 +132,7 @@ class _HomeScreenState extends State<HomeScreen> {
         clearToken: () => _secure.delete(key: 'spotify_token'),
       ),
     );
-    _spotify.restoreSession().then((_) async {
-      _spotify.api.clientId = await _secure.read(key: 'spotify_client_id');
-      if (mounted) setState(() {});
-    });
+    _spotify.restoreSession();
     _providers = [
       if (_local != null) _local,
       _qobuz,
@@ -210,63 +207,14 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _connectSpotify() async {
-    var cid = _spotify.api.clientId;
-    if (cid == null || cid.isEmpty) {
-      cid = await _promptSpotifyClientId();
-      if (cid == null) return;
-    }
     final ok = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (_) => SpotifyLoginScreen(
-          clientId: cid!,
           onCode: (code, verifier) => _spotify.api.exchangeCode(code, verifier),
         ),
       ),
     );
     if (ok == true && mounted) setState(() {});
-  }
-
-  Future<String?> _promptSpotifyClientId() async {
-    final c = TextEditingController(text: _spotify.api.clientId ?? '');
-    final result = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Spotify client ID'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Spotify requires your own free developer app. Create one at '
-              'developer.spotify.com/dashboard, then add exactly this '
-              'redirect URI in its settings:',
-              style: TextStyle(fontSize: 13),
-            ),
-            const SizedBox(height: 8),
-            SelectableText(spotifyRedirectUri,
-                style: const TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
-            TextField(
-              controller: c,
-              decoration: const InputDecoration(labelText: 'Client ID'),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Cancel')),
-          TextButton(
-              onPressed: () => Navigator.of(ctx).pop(c.text.trim()),
-              child: const Text('Save')),
-        ],
-      ),
-    );
-    if (result == null || result.isEmpty) return null;
-    _spotify.api.clientId = result;
-    await _secure.write(key: 'spotify_client_id', value: result);
-    if (mounted) setState(() {});
-    return result;
   }
 
   Future<void> _disconnectSpotify() async {
@@ -360,7 +308,6 @@ class _HomeScreenState extends State<HomeScreen> {
               if (value == 'ytm_logout') _disconnectYtm();
               if (value == 'spotify_login') _connectSpotify();
               if (value == 'spotify_logout') _disconnectSpotify();
-              if (value == 'spotify_client') _promptSpotifyClientId();
               if (value == 'import') _openImport();
               if (value == 'quality_highest') setState(() => _quality = QualityPref.highest);
               if (value == 'quality_balanced') setState(() => _quality = QualityPref.balanced);
@@ -424,14 +371,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     title: Text('Disconnect Spotify'),
                   ),
                 ),
-              const PopupMenuItem(
-                value: 'spotify_client',
-                child: ListTile(
-                  dense: true,
-                  leading: Icon(Icons.key),
-                  title: Text('Spotify client ID…'),
-                ),
-              ),
               const PopupMenuItem(
                 value: 'import',
                 child: ListTile(

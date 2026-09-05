@@ -13,11 +13,9 @@ import 'spotify_api.dart';
 /// is intercepted and the `code` parameter is exchanged with the
 /// stored verifier.
 class SpotifyLoginScreen extends StatefulWidget {
-  final String clientId;
   final Future<void> Function(String code, String verifier) onCode;
 
-  const SpotifyLoginScreen(
-      {super.key, required this.clientId, required this.onCode});
+  const SpotifyLoginScreen({super.key, required this.onCode});
 
   @override
   State<SpotifyLoginScreen> createState() => _SpotifyLoginScreenState();
@@ -37,7 +35,7 @@ class _SpotifyLoginScreenState extends State<SpotifyLoginScreen> {
     _challenge = base64UrlEncode(sha256.convert(utf8.encode(_verifier)).bytes)
         .replaceAll('=', '');
     final url = 'https://accounts.spotify.com/authorize'
-        '?client_id=${Uri.encodeComponent(widget.clientId)}'
+        '?client_id=$spotifyClientId'
         '&response_type=code'
         '&redirect_uri=${Uri.encodeComponent(spotifyRedirectUri)}'
         '&scope=${Uri.encodeComponent('playlist-read-private user-library-read')}'
