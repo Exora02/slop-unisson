@@ -96,6 +96,19 @@ class QobuzProvider implements MusicProvider {
       try {
         final s = await _api.getFileUrl(did, f);
         if (s.url.isNotEmpty) {
+          // getFileUrl often omits the embedded track/album object —
+          // favorites imports have no covers without this backfill.
+          var art = s.artwork;
+          var album = s.album;
+          if (art == null || album == null) {
+            try {
+              final meta = await _api.getTrackMeta(did);
+              art ??= meta.artwork;
+              album ??= meta.album;
+            } catch (_) {
+              // cover backfill is best-effort, never block playback
+            }
+          }
           return StreamSpec(
             uri: Uri.parse(s.url),
             contentType: s.mimeType,
@@ -104,8 +117,8 @@ class QobuzProvider implements MusicProvider {
                 ? null
                 : (s.sampleRate! * 1000).toInt(),
             bitDepth: s.bitDepth,
-            artwork: s.artwork,
-            album: s.album,
+            artwork: art,
+            album: album,
           );
         }
       } catch (_) {

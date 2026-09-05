@@ -277,6 +277,13 @@ class QobuzApi {
     }
   }
 
+  /// Track metadata (artwork, album title) for a track id. The
+  /// favorites/playlist endpoints ship no album art; track/get does.
+  Future<QobuzTrack> getTrackMeta(String trackId) async {
+    final j = await _get('track/get', params: {'track_id': trackId});
+    return QobuzTrack.fromJson(j);
+  }
+
   /// All playlists in the user's library (paginated, MA-style).
   Future<List<QobuzPlaylist>> getUserPlaylists() async {
     final out = <QobuzPlaylist>[];

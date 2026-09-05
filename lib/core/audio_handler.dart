@@ -146,8 +146,9 @@ class UnissonAudioHandler extends BaseAudioHandler {
       _recoverPlayback();
     });
     // Some failures never raise an error — the position just freezes
-    // while "playing". Watch for that too.
+    // while "playing". Watch for that too, and for a hung load.
     _stallWatch = Timer.periodic(const Duration(seconds: 5), (_) {
+      _forceUnlockIfNeeded();
       final stalled = _player.playing &&
           DateTime.now().difference(_lastPositionAdvance) >
               const Duration(seconds: 20);
@@ -365,8 +366,9 @@ class UnissonAudioHandler extends BaseAudioHandler {
   /// Single-flight around just_audio's setAudioSource. Overlapping calls here
   /// deadlock the platform channel and make every control look dead. At
   /// most one apply runs; a request that lands mid-apply REPLACES the
-  /// pending slot — the newest track wins, so the audio can never be
-  /// left on a superseded track while the UI shows the new one.
+  /// pending slot — the newest track always wins. If setAudioSource
+  /// itself hangs (dead/expired URL that never times out internally),
+  /// the watchdog force-unlocks the slot so the queue keeps moving.
   Future<void> _applySource(
     Uri uri, {
     required bool autoplay,
@@ -383,6 +385,9 @@ class UnissonAudioHandler extends BaseAudioHandler {
     await _runApply(uri, autoplay: autoplay, resumeAt: resumeAt, gen: gen);
   }
 
+  DateTime? _applyDeadline;
+  int _applyGen = -1;
+
   Future<void> _runApply(
     Uri uri, {
     required bool autoplay,
@@ -390,6 +395,8 @@ class UnissonAudioHandler extends BaseAudioHandler {
     required int gen,
   }) async {
     _loading = true;
+    _applyGen = gen;
+    _applyDeadline = DateTime.now().add(const Duration(seconds: 45));
     try {
       if (gen != _loadGen) return;
       await _player.setAudioSource(
@@ -408,7 +415,12 @@ class UnissonAudioHandler extends BaseAudioHandler {
         _errorSubject.add(_lastApplyError!);
       }
     } finally {
-      _loading = false;
+      // Only release the slot if THIS apply is still the current one —
+      // a force-unlock by the watchdog must not be overwritten.
+      if (_applyGen == gen) {
+        _loading = false;
+        _applyDeadline = null;
+      }
       if (_pendingLoad) {
         _pendingLoad = false;
         final u = _pendingUri;
@@ -419,6 +431,22 @@ class UnissonAudioHandler extends BaseAudioHandler {
           await _runApply(u, autoplay: _pendingAutoplay, resumeAt: r, gen: _loadGen);
         }
       }
+    }
+  }
+
+  /// Watchdog: a hung setAudioSource (dead URL, no internal timeout)
+  /// wedges the single-flight slot forever. Force-unlock it so the
+  /// pending/next load can proceed. The player object itself recovers
+  /// on the next setAudioSource call.
+  void _forceUnlockIfNeeded() {
+    if (!_loading) return;
+    final dl = _applyDeadline;
+    if (dl != null && DateTime.now().isAfter(dl)) {
+      _loading = false;
+      _applyDeadline = null;
+      _pendingLoad = true;
+      _pendingUri = null; // no pending uri -> just release; recovery will reload
+      _errorSubject.add('Playback stalled — recovering');
     }
   }
 

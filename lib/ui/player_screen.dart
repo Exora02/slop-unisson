@@ -250,7 +250,15 @@ class _SourceSheet extends StatelessWidget {
                     value: sourceId,
                     groupValue: currentSourceId,
                     onChanged: (v) {
-                      if (v != null) handler.switchSource(v);
+                      if (v == null) return;
+                      handler.switchSource(v);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          duration: const Duration(seconds: 2),
+                          content:
+                              Text('Switching to ${_labels[v] ?? v}…'),
+                        ),
+                      );
                       Navigator.of(context).pop();
                     },
                   ),
