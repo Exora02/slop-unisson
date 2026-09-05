@@ -1,5 +1,8 @@
+import 'dart:io' show HttpClient, HttpHeaders;
+
 import '../../core/models.dart';
 import '../../core/provider.dart';
+import '../../core/stream_proxy.dart';
 import 'innertube.dart';
 import 'search_client.dart';
 import 'ytm_library_client.dart';
@@ -79,6 +82,36 @@ class YtmProvider implements MusicProvider {
   Future<Uri?> resolveUriById(String videoId) async {
     final r = await _streams.resolve(videoId, force: true);
     return r == null ? null : Uri.parse(r.url);
+  }
+
+  /// On-device diagnostics: walk the ladder on THIS network, byte-fetch
+  /// each resolved URL directly and through the proxy, and report per
+  /// client what worked. This is the ground truth that server-side
+  /// probes cannot see (they run on a different IP entirely).
+  Future<List<String>> diagnose() async {
+    final out = <String>[];
+    await _streams.diagnose(out, (url, ua) async {
+      final proxy = StreamProxy();
+      await proxy.start();
+      final local = proxy.proxyUrl(
+          sourceId: 'ytm', trackId: 'diag', originUrl: url, userAgent: ua);
+      try {
+        final c = HttpClient()..autoUncompress = false;
+        final req = await c.openUrl('GET', local);
+        req.headers.set(HttpHeaders.rangeHeader, 'bytes=0-1');
+        final resp = await req.close().timeout(const Duration(seconds: 15));
+        final bytes = await resp.first.timeout(const Duration(seconds: 15));
+        await resp.drain<void>().catchError((_) {});
+        c.close();
+        proxy.dispose();
+        return 'proxy ${resp.statusCode} ${bytes.length}B';
+      } catch (e) {
+        proxy.dispose();
+        final msg = e.toString();
+        return 'proxy ERR ${msg.length > 70 ? msg.substring(0, 70) : msg}';
+      }
+    });
+    return out;
   }
 
   @override

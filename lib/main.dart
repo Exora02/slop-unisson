@@ -25,7 +25,7 @@ import 'ui/import_sheet.dart';
 import 'ui/library_screen.dart';
 import 'ui/mini_player.dart';
 
-const appBuildTag = 'v0.5.9-proxy3';
+const appBuildTag = 'v0.5.10-diag';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -222,6 +222,37 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) setState(() {});
   }
 
+  /// On-device YTM diagnostics: real ladder walk + byte-fetches from
+  /// THIS phone's network. Results dialog is copyable text.
+  Future<void> _runYtmDiagnostics() async {
+    final future = _ytm.diagnose();
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('YTM stream diagnostics'),
+        content: SizedBox(
+          width: 420,
+          child: FutureBuilder<List<String>>(
+            future: future,
+            builder: (ctx, snap) => snap.hasData
+                ? SingleChildScrollView(
+                    child: SelectableText(snap.data!.join('\n')),
+                  )
+                : snap.hasError
+                    ? Text('diagnostics failed: ${snap.error}')
+                    : const Text('running diagnostics…'),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _openImport() async {
     final store = await _storeFuture;
     final importer = ImportService(
@@ -319,6 +350,7 @@ class _HomeScreenState extends State<HomeScreen> {
               if (value == 'spotify_login') _connectSpotify();
               if (value == 'spotify_logout') _disconnectSpotify();
               if (value == 'import') _openImport();
+              if (value == 'ytm_diag') _runYtmDiagnostics();
               if (value == 'quality_highest') setState(() => _quality = QualityPref.highest);
               if (value == 'quality_balanced') setState(() => _quality = QualityPref.balanced);
               if (value == 'quality_lowest') setState(() => _quality = QualityPref.lowest);
@@ -387,6 +419,14 @@ class _HomeScreenState extends State<HomeScreen> {
                   dense: true,
                   leading: Icon(Icons.download),
                   title: Text('Import playlists & favorites'),
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'ytm_diag',
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(Icons.network_check),
+                  title: Text('Diagnose YTM streams'),
                 ),
               ),
               const PopupMenuDivider(),

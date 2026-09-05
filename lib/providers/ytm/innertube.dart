@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show HttpClient, HttpHeaders;
 
 import 'package:http/http.dart' as http;
 
@@ -300,6 +301,50 @@ class InnerTubeClient {
       return DateTime.fromMillisecondsSinceEpoch(int.parse(m.group(1)!) * 1000);
     }
     return DateTime.now().add(const Duration(hours: 6));
+  }
+
+  /// Diagnostics walker: for every ladder client, resolve a video and
+  /// report the playability + whether a direct audio URL exists, then
+  /// hand the URL to [fetchThroughProxy] for an on-device byte-fetch.
+  /// Writes one human-readable line per client into [out].
+  Future<void> diagnose(List<String> out,
+      Future<String> Function(Uri url, String ua) fetchThroughProxy) async {
+    const videoId = 'jNQXAC9IVRw'; // stable public video (Me at the zoo)
+    for (final c in _clients) {
+      if (c.auth && cookie == null) {
+        out.add('${c.name}: skipped (not logged in)');
+        continue;
+      }
+      try {
+        final r = await _playerCall(videoId, c).timeout(
+            const Duration(seconds: 25));
+        if (r == null) {
+          final t = lastAttemptTrace.isEmpty ? '' : lastAttemptTrace.last;
+          out.add('${c.name}: resolve failed $t');
+          continue;
+        }
+        var line = '${c.name}: resolved itag=${r.itag}';
+        // raw direct fetch with the minting UA
+        try {
+          final client = HttpClient()..autoUncompress = false;
+          final req = await client.openUrl('GET', Uri.parse(r.url));
+          req.headers.set(HttpHeaders.userAgentHeader, r.userAgent);
+          req.headers.set(HttpHeaders.rangeHeader, 'bytes=0-1');
+          final resp =
+              await req.close().timeout(const Duration(seconds: 15));
+          final n = await resp.fold<int>(0, (a, d) => a + d.length);
+          client.close();
+          line += ' | direct ${resp.statusCode} ${n}B';
+        } catch (e) {
+          line += ' | direct ERR';
+        }
+        final proxied = await fetchThroughProxy(Uri.parse(r.url), r.userAgent);
+        line += ' | $proxied';
+        out.add(line);
+      } catch (e) {
+        out.add('${c.name}: diag error ${e.toString()}');
+      }
+    }
   }
 
   void dispose() {

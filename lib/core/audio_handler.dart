@@ -187,6 +187,14 @@ class UnissonAudioHandler extends BaseAudioHandler {
   Future<void> _recoverPlayback() async {
     final entry = _queue.current;
     if (entry == null) return;
+    // Never auto-recover onto a source the user explicitly chose — if
+    // that source is failing, the reload loop would just re-fail it
+    // forever (and re-wedge the single-flight slot). The user decides.
+    if (entry.sourceId != null) {
+      _errorSubject.add(
+          'Source ${entry.sourceId} failed — switch source or skip');
+      return;
+    }
     if (DateTime.now().difference(_lastRecovery) <
         const Duration(seconds: 30)) {
       return;
@@ -478,9 +486,10 @@ class UnissonAudioHandler extends BaseAudioHandler {
   }
 
   /// Watchdog: a hung setAudioSource (dead URL, no internal timeout)
-  /// wedges the single-flight slot forever. Force-unlock it so the
-  /// pending/next load can proceed. The player object itself recovers
-  /// on the next setAudioSource call.
+  /// wedges the single-flight slot forever AND the player — every skip
+  /// then queues behind it (only a manual pause/stop freed it). Force:
+  /// stop() the player (aborts the hung load so its finally runs) and
+  /// release the slot so the next load proceeds immediately.
   void _forceUnlockIfNeeded() {
     if (!_loading) return;
     final dl = _applyDeadline;
@@ -488,7 +497,8 @@ class UnissonAudioHandler extends BaseAudioHandler {
       _loading = false;
       _applyDeadline = null;
       _pendingLoad = true;
-      _pendingUri = null; // no pending uri -> just release; recovery will reload
+      _pendingUri = null;
+      unawaited(_player.stop());
       _errorSubject.add('Playback stalled — recovering');
     }
   }
