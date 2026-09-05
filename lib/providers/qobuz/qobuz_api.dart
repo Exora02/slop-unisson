@@ -55,15 +55,19 @@ class QobuzTrack {
       final albumObj = j['album'] as Map<String, dynamic>?;
       final albumArtist = albumObj?['artist'] as Map<String, dynamic>?;
       final artistName = performer?['name'] ?? albumArtist?['name'];
-      final image = j['image'] as Map<String, dynamic>?;
+      // Artwork hides in two places depending on endpoint: top-level
+      // "image" (search) or "album.image" (favorites/playlist tracks).
       Object? artUrl;
-      if (image != null) {
-        for (final k in ['large', 'medium', 'small']) {
-          if (image[k] != null) {
-            artUrl = image[k];
-            break;
+      for (final holder in [j['image'], albumObj?['image']]) {
+        if (holder is Map<String, dynamic>) {
+          for (final k in ['large', 'medium', 'small']) {
+            if (holder[k] != null) {
+              artUrl = holder[k];
+              break;
+            }
           }
         }
+        if (artUrl != null) break;
       }
       final id = j['id'];
       final title = j['title'];

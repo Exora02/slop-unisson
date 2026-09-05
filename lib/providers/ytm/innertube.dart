@@ -40,14 +40,16 @@ class _Client {
       this.osVersionOverride});
 }
 
-// Ladder verified live on 2026-08-18 against a failing videoId:
-// - ANDROID_MUSIC 7.16.51 passes the precondition check but answers
-//   LOGIN_REQUIRED anonymously -> with the user's cookie it yields the
-//   full-quality opus streams.
-// - IOS is the only client that resolves anonymously (direct AAC urls).
-// Everything else (old ANDROID_MUSIC, ANDROID, ANDROID_VR,
-// ANDROID_TESTSUITE, WEB, MWEB, TVHTML5*) is dead: 400 Precondition
-// check failed / LOGIN_REQUIRED / UNPLAYABLE / "no longer supported".
+// Ladder verified live on 2026-09-05 (probe: URL byte-fetch verified):
+// - ANDROID_MUSIC 7.16.51 + user cookie (SAPISIDHASH) -> full-quality
+//   opus streams. Skipped when not logged in.
+// - IOS 20.32.4 with FULL device context (deviceModel/osName/osVersion)
+//   -> direct AAC/opus URLs that actually serve bytes. A lean context
+//   (clientName+version only) gets status=OK but NO direct URLs —
+//   ciphered only. Device identity is mandatory, not cosmetic.
+// - ANDROID_VR 1.65.10: anonymous resolve works but has begun hitting
+//   the bot wall intermittently (LOGIN_REQUIRED). Kept as last-resort
+//   rung with device fields; the canary re-probes it daily.
 const _clients = [
   _Client(
       'ANDROID_MUSIC',
@@ -59,7 +61,7 @@ const _clients = [
       auth: true),
   _Client('IOS', '5', '20.32.4', _androidKey, 0,
       'com.google.ios.youtube/20.32.4 (iPhone16,2; U; CPU iOS 18_6 like Mac OS X;)',
-      lean: true),
+      lean: true, deviceModel: 'iPhone16,2', osVersionOverride: '18.6.0'),
     // CANARY-MANAGED anonymous fallback: the ytm_ladder_canary cron rewrites
   // this entry from yt-dlp's current working spec when it rots.
   _Client('ANDROID_VR', '28', '1.65.10', _androidKey, 32,
@@ -180,6 +182,13 @@ class InnerTubeClient {
             'gl': 'US',
             'utcOffsetMinutes': 0,
           };
+    if (c.lean) {
+      // iOS-family clients: device identity is REQUIRED — a lean
+      // context (name+version only) returns ciphered-only formats.
+      ctx['osName'] = 'iPhone';
+      ctx['osVersion'] = c.osVersionOverride ?? '18.6.0';
+      ctx['deviceModel'] = c.deviceModel ?? 'iPhone16,2';
+    }
     final body = <String, dynamic>{
       'videoId': videoId,
       'context': {'client': ctx},
