@@ -75,6 +75,12 @@ class YtmProvider implements MusicProvider {
     );
   }
 
+  /// Fresh stream URL for the proxy's mid-stream re-resolve.
+  Future<Uri?> resolveUriById(String videoId) async {
+    final r = await _streams.resolve(videoId, force: true);
+    return r == null ? null : Uri.parse(r.url);
+  }
+
   @override
   Future<StreamSpec> resolveStream(Track track, QualityPref pref) async {
     final r = await _streams.resolve(track.id);

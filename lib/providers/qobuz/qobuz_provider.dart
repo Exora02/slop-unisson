@@ -64,6 +64,18 @@ class QobuzProvider implements MusicProvider {
         QualityPref.lowest => 6,
       };
 
+  /// Fresh stream URL for the proxy's mid-stream re-resolve (Qobuz
+  /// tokens die mid-track). Returns null when nothing resolves.
+  Future<Uri?> resolveStreamById(String trackId, int formatId) async {
+    for (final f in [formatId, 7, 6, 5].toSet()) {
+      try {
+        final s = await _api.getFileUrl(trackId, f);
+        if (s.url.isNotEmpty) return Uri.parse(s.url);
+      } catch (_) {}
+    }
+    return null;
+  }
+
   @override
   Future<SearchResults> search(String query) async {
     if (!_loggedIn) return const SearchResults();

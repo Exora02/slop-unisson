@@ -8,13 +8,37 @@ import 'package:rxdart/rxdart.dart';
 import 'library_service.dart';
 import 'library_store.dart';
 import 'models.dart';
+import '../providers/qobuz/qobuz_provider.dart' show QobuzProvider;
+import '../providers/ytm/ytm_provider.dart' show YtmProvider;
 import 'queue.dart';
+import 'stream_proxy.dart';
 
 /// Central playback service: owns the queue, resolves streams with
 /// source-fallback, drives just_audio, and feeds audio_service so
 /// lock-screen / notification controls work.
 class UnissonAudioHandler extends BaseAudioHandler {
   final LibraryService library;
+
+  /// Local loopback proxy the player streams through. Intercepts CDN
+  /// token deaths (403 on Qobuz mid-track) and client-identity rejections
+  /// ("playback error 0" on googlevideo) — re-resolves and retries with
+  /// the same Range so the player never notices.
+  late final StreamProxy proxy = () {
+    final p = StreamProxy();
+    for (final pr in library.providers) {
+      if (!pr.isConfigured) continue;
+      if (pr is QobuzProvider) {
+        p.registerResolver('qobuz', (trackId, hint) async {
+          return await pr.resolveStreamById(trackId, hint ?? 27);
+        });
+      } else if (pr is YtmProvider) {
+        p.registerResolver('ytm', (trackId, hint) async {
+          return await pr.resolveUriById(trackId);
+        });
+      }
+    }
+    return p;
+  }();
 
   /// Library persistence, used to write back source enrichment results.
   /// Nullable only so tests/factories without a store still work.
@@ -105,6 +129,8 @@ class UnissonAudioHandler extends BaseAudioHandler {
 
   UnissonAudioHandler({required this.library, this.storeFuture}) {
     _init();
+    // proxy must be listening before the first track can load
+    unawaited(proxy.start());
   }
 
   Future<void> _init() async {
@@ -356,11 +382,23 @@ class UnissonAudioHandler extends BaseAudioHandler {
       storeFuture?.then((s) => s.updateTrackMeta(entry.track.universalKey,
           artwork: spec.artwork, album: spec.album));
     }
+
+    // Stream through the local proxy: it re-resolves expired tokens
+    // (Qobuz mid-track death) and sends the client identity the CDN
+    // minted the URL for (googlevideo "playback error 0" fix).
+    final playUri = source == 'ytm' || source == 'qobuz'
+        ? proxy.proxyUrl(
+            sourceId: source,
+            trackId: track.id,
+            originUrl: spec.uri,
+            formatHint: source == 'qobuz' ? 27 : null,
+          )
+        : spec.uri;
     mediaItem.add(_toMediaItem(entry.track, track, spec));
 
     _enrichInBackground(entry);
 
-    await _applySource(spec.uri, autoplay: autoplay, resumeAt: resumeAt, gen: gen);
+    await _applySource(playUri, autoplay: autoplay, resumeAt: resumeAt, gen: gen);
   }
 
   /// Single-flight around just_audio's setAudioSource. Overlapping calls here
