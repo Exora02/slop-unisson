@@ -64,6 +64,12 @@ class StreamSpec {
   final int? bitDepth;
   final DateTime? expiresAt;
 
+  /// Metadata that only arrives with the stream (e.g. Qobuz getFileUrl
+  /// carries album art/title the favorites endpoint omits). Filled
+  /// into the merged track and persisted when missing.
+  final String? artwork;
+  final String? album;
+
   const StreamSpec({
     required this.uri,
     required this.contentType,
@@ -71,5 +77,7 @@ class StreamSpec {
     this.sampleRate,
     this.bitDepth,
     this.expiresAt,
+    this.artwork,
+    this.album,
   });
 }

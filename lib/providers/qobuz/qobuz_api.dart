@@ -250,6 +250,17 @@ class QobuzApi {
     try {
       final url = j['url'] as String?;
       if (url == null) throw Exception('Qobuz returned no stream URL');
+      Object? artUrl;
+      final track = j['track'] as Map<String, dynamic>?;
+      final image = track?['album']?['image'] as Map<String, dynamic>?;
+      if (image != null) {
+        for (final k in ['large', 'medium', 'small']) {
+          if (image[k] != null) {
+            artUrl = image[k];
+            break;
+          }
+        }
+      }
       return QobuzStream(
         url: url,
         formatId: (j['format_id'] as num?)?.toInt() ?? formatId,
@@ -257,6 +268,8 @@ class QobuzApi {
         sampleRate: (j['sampling_rate'] as num?)?.toDouble(),
         bitDepth: (j['bit_depth'] as num?)?.toInt(),
         duration: (j['duration'] as num?)?.toInt(),
+        artwork: artUrl?.toString(),
+        album: track?['album']?['title'] as String?,
       );
     } on TypeError catch (e) {
       throw Exception('Qobuz getFileUrl field-type mismatch: $e '
@@ -366,6 +379,11 @@ class QobuzStream {
   final int? bitDepth;
   final int? duration;
 
+  /// Track metadata shipped alongside getFileUrl responses (album art,
+  /// album title) — the favorites endpoint does not include them.
+  final String? artwork;
+  final String? album;
+
   QobuzStream({
     required this.url,
     required this.formatId,
@@ -373,5 +391,7 @@ class QobuzStream {
     this.sampleRate,
     this.bitDepth,
     this.duration,
+    this.artwork,
+    this.album,
   });
 }

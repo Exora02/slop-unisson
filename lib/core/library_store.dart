@@ -302,6 +302,45 @@ class LibraryStore {
     await _loadAll();
   }
 
+  /// Fill missing metadata (artwork, album) on every saved copy of a
+  /// track. Sources like Qobuz only ship album art with the stream
+  /// response, so imported favorites gain covers on first play.
+  Future<void> updateTrackMeta(String key,
+      {String? artwork, String? album}) async {
+    if (artwork == null && album == null) return;
+    await _db.transaction((txn) async {
+      for (final table in const ['favorites', 'playlist_items', 'recent']) {
+        final rows =
+            await txn.query(table, where: 'key = ?', whereArgs: [key]);
+        for (final row in rows) {
+          final mt = _decode(row['track_json'] as String);
+          if (mt == null) continue;
+          var changed = false;
+          if (artwork != null && mt.artwork == null) {
+            mt.artwork = artwork;
+            changed = true;
+          }
+          if (album != null && mt.album == null) {
+            mt.album = album;
+            changed = true;
+          }
+          if (!changed) continue;
+          if (table == 'playlist_items') {
+            await txn.update(
+                table, {'track_json': jsonEncode(mergedTrackToJson(mt))},
+                where: 'playlist_id = ? AND key = ?',
+                whereArgs: [row['playlist_id'], key]);
+          } else {
+            await txn.update(
+                table, {'track_json': jsonEncode(mergedTrackToJson(mt))},
+                where: 'key = ?', whereArgs: [key]);
+          }
+        }
+      }
+    });
+    await _loadAll();
+  }
+
   MergedTrack? _decode(String json) {
     try {
       return mergedTrackFromJson(

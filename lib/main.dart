@@ -25,7 +25,7 @@ import 'ui/import_sheet.dart';
 import 'ui/library_screen.dart';
 import 'ui/mini_player.dart';
 
-const appBuildTag = 'v0.5.3-spotify';
+const appBuildTag = 'v0.5.4-playback';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

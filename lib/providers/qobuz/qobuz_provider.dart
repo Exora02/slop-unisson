@@ -99,8 +99,13 @@ class QobuzProvider implements MusicProvider {
           return StreamSpec(
             uri: Uri.parse(s.url),
             contentType: s.mimeType,
-            sampleRate: s.sampleRate?.toInt(),
+            // Qobuz reports kHz (44.1); the app speaks Hz everywhere.
+            sampleRate: (s.sampleRate ?? 0) * 1000 == 0
+                ? null
+                : (s.sampleRate! * 1000).toInt(),
             bitDepth: s.bitDepth,
+            artwork: s.artwork,
+            album: s.album,
           );
         }
       } catch (_) {

@@ -82,7 +82,21 @@ class UnissonAudioHandler extends BaseAudioHandler {
   bool _pendingAutoplay = true;
   Uri? _pendingUri;
   Duration? _pendingResume;
-  int _pendingGen = 0;
+
+  /// Last playback error from just_audio's load step, cleared on
+  /// success. switchSource consults it to revert a failed switch.
+  String? _lastApplyError;
+
+  /// True when the most recent _loadCurrent could not resolve a stream.
+  bool _lastLoadFailed = false;
+
+  /// Last position where playback was actually advancing — the resume
+  /// point when a stream dies mid-track (Qobuz URLs expire after a
+  /// while and the player just stalls).
+  Duration _lastGoodPosition = Duration.zero;
+  DateTime _lastPositionAdvance = DateTime.now();
+  DateTime _lastRecovery = DateTime.fromMillisecondsSinceEpoch(0);
+  Timer? _stallWatch;
 
   /// Position ticks fire ~4x/s; only broadcast playback state to the
   /// platform channel once per second (event-driven broadcasts stay
@@ -111,7 +125,11 @@ class UnissonAudioHandler extends BaseAudioHandler {
       _broadcastState();
     });
     _player.playingStream.listen((_) => _broadcastState());
-    _player.positionStream.listen((_) {
+    _player.positionStream.listen((p) {
+      if (p > _lastGoodPosition + const Duration(milliseconds: 200)) {
+        _lastGoodPosition = p;
+        _lastPositionAdvance = DateTime.now();
+      }
       final now = DateTime.now();
       if (now.difference(_lastPosBroadcast).inMilliseconds >= 1000) {
         _lastPosBroadcast = now;
@@ -119,6 +137,40 @@ class UnissonAudioHandler extends BaseAudioHandler {
       }
     });
     _player.durationStream.listen((_) => _broadcastState());
+
+    // A stream that dies mid-track (expired URL, network drop) surfaces
+    // here. Reload the current entry at the last good position with a
+    // freshly resolved URL instead of leaving the player dead.
+    _player.errorStream.listen((e) {
+      _errorSubject.add('Player error: $e');
+      _recoverPlayback();
+    });
+    // Some failures never raise an error — the position just freezes
+    // while "playing". Watch for that too.
+    _stallWatch = Timer.periodic(const Duration(seconds: 5), (_) {
+      final stalled = _player.playing &&
+          DateTime.now().difference(_lastPositionAdvance) >
+              const Duration(seconds: 20);
+      if (stalled) _recoverPlayback();
+    });
+  }
+
+  /// Reload the current track from a fresh URL at the last advancing
+  /// position. Rate-limited so a hard-failing source cannot loop this.
+  Future<void> _recoverPlayback() async {
+    final entry = _queue.current;
+    if (entry == null) return;
+    if (DateTime.now().difference(_lastRecovery) <
+        const Duration(seconds: 30)) {
+      return;
+    }
+    _lastRecovery = DateTime.now();
+    final resume = _lastGoodPosition;
+    _lastPositionAdvance = DateTime.now();
+    await _loadCurrent(
+      autoplay: true,
+      resumeAt: resume > const Duration(seconds: 1) ? resume : null,
+    );
   }
 
   // ---------- queue operations ----------
@@ -238,34 +290,71 @@ class UnissonAudioHandler extends BaseAudioHandler {
 
   /// Change the current track's source (and optionally quality) and reload.
   /// Keeps the playback position so switching doesn't restart the song.
+  /// An explicit switch is a statement of intent: it must NOT silently
+  /// fall back to another source. If the chosen source fails, the
+  /// previous source is restored and the reason is surfaced.
   Future<void> switchSource(String sourceId, {QualityPref? qualityPref}) async {
     final entry = _queue.current;
     if (entry == null) return;
     final wasPlaying = _player.playing;
     final pos = _player.position;
+    final prevSource = entry.sourceId;
+    final prevQuality = entry.qualityOverride;
     entry.sourceId = sourceId;
     if (qualityPref != null) entry.qualityOverride = qualityPref;
     _broadcastQueue();
-    // Resume where we were instead of starting over.
     await _loadCurrent(
       autoplay: wasPlaying,
       resumeAt: pos > Duration.zero ? pos : null,
+      explicitSource: true,
     );
+    // The switch did not actually take — restore what was playing.
+    if (_lastLoadFailed || _lastApplyError != null) {
+      entry.sourceId = prevSource;
+      entry.qualityOverride = prevQuality;
+      _broadcastQueue();
+      _lastLoadFailed = false;
+      _lastApplyError = null;
+      await _loadCurrent(
+        autoplay: wasPlaying,
+        resumeAt: pos > Duration.zero ? pos : null,
+      );
+    }
   }
 
-  Future<void> _loadCurrent({required bool autoplay, Duration? resumeAt}) async {
+  Future<void> _loadCurrent(
+      {required bool autoplay, Duration? resumeAt, bool explicitSource = false}) async {
     final entry = _queue.current;
     if (entry == null) return;
 
     final gen = ++_loadGen;
+    _lastApplyError = null;
+    _lastLoadFailed = false;
 
-    final spec = await _resolveWithFallback(entry, gen);
+    final spec =
+        await _resolveWithFallback(entry, gen, explicit: explicitSource);
     if (gen != _loadGen) return; // superseded by a newer skip/load
 
-    if (spec == null) return; // _resolveWithFallback emitted the reason
+    if (spec == null) {
+      _lastLoadFailed = true;
+      return; // _resolveWithFallback emitted the reason
+    }
 
     final source = entry.sourceId ?? entry.track.bestSourceId;
     final track = entry.track.sources[source] ?? entry.track.sources.values.first;
+    // Sources that only ship artwork with the stream (Qobuz getFileUrl)
+    // fill it in here so saved copies gain covers over time.
+    if (entry.track.artwork == null && spec.artwork != null) {
+      entry.track.artwork = spec.artwork;
+    }
+    if (entry.track.album == null && spec.album != null) {
+      entry.track.album = spec.album;
+      _broadcastQueue();
+    }
+    if (spec.artwork != null || spec.album != null) {
+      storeFuture?.then((s) => s.updateTrackMeta(entry.track.universalKey,
+          artwork: spec.artwork, album: spec.album));
+    }
     mediaItem.add(_toMediaItem(entry.track, track, spec));
 
     _enrichInBackground(entry);
@@ -275,8 +364,9 @@ class UnissonAudioHandler extends BaseAudioHandler {
 
   /// Single-flight around just_audio's setAudioSource. Overlapping calls here
   /// deadlock the platform channel and make every control look dead. At
-  /// most one apply runs; a request that lands mid-apply is coalesced and the
-  /// latest one replays when the current apply finishes.
+  /// most one apply runs; a request that lands mid-apply REPLACES the
+  /// pending slot — the newest track wins, so the audio can never be
+  /// left on a superseded track while the UI shows the new one.
   Future<void> _applySource(
     Uri uri, {
     required bool autoplay,
@@ -288,7 +378,6 @@ class UnissonAudioHandler extends BaseAudioHandler {
       _pendingLoad = true;
       _pendingUri = uri;
       _pendingResume = resumeAt;
-      _pendingGen = gen;
       return;
     }
     await _runApply(uri, autoplay: autoplay, resumeAt: resumeAt, gen: gen);
@@ -309,21 +398,25 @@ class UnissonAudioHandler extends BaseAudioHandler {
         initialPosition: resumeAt,
       );
       if (gen != _loadGen) return;
+      _lastApplyError = null;
+      _lastGoodPosition = resumeAt ?? Duration.zero;
+      _lastPositionAdvance = DateTime.now();
       if (autoplay) await _player.play();
     } catch (e) {
-      if (gen == _loadGen) _errorSubject.add('Playback error: $e');
+      if (gen == _loadGen) {
+        _lastApplyError = 'Playback error: $e';
+        _errorSubject.add(_lastApplyError!);
+      }
     } finally {
       _loading = false;
       if (_pendingLoad) {
         _pendingLoad = false;
         final u = _pendingUri;
         final r = _pendingResume;
-        final g = _pendingGen;
         _pendingUri = null;
         _pendingResume = null;
         if (u != null) {
-          await _runApply(u,
-              autoplay: _pendingAutoplay, resumeAt: r, gen: g);
+          await _runApply(u, autoplay: _pendingAutoplay, resumeAt: r, gen: _loadGen);
         }
       }
     }
@@ -333,12 +426,16 @@ class UnissonAudioHandler extends BaseAudioHandler {
   /// priority order. Returns the first stream that resolves. Aborts early if
   /// a newer load has superseded this one, so a stuck source can't hang the
   /// whole chain. On total failure, emits a diagnostic saying WHY.
-  Future<StreamSpec?> _resolveWithFallback(QueueEntry entry, int gen) async {
+  /// [explicit]: the user asked for THIS source (source switcher) —
+  /// no fallback walk, the failure must be reported, not papered over.
+  Future<StreamSpec?> _resolveWithFallback(QueueEntry entry, int gen,
+      {bool explicit = false}) async {
     final preferred = entry.sourceId ?? entry.track.bestSourceId;
     final order = <String>[
       preferred,
-      for (final id in const ['local', 'qobuz', 'ytm', 'tidal', 'spotify'])
-        if (id != preferred && entry.track.sources.containsKey(id)) id,
+      if (!explicit)
+        for (final id in const ['local', 'qobuz', 'ytm', 'tidal', 'spotify'])
+          if (id != preferred && entry.track.sources.containsKey(id)) id,
     ];
     final pref = entry.qualityOverride ?? quality;
     final attempts = <String>[];
@@ -483,6 +580,7 @@ class UnissonAudioHandler extends BaseAudioHandler {
   }
 
   Future<void> dispose() async {
+    _stallWatch?.cancel();
     await _player.dispose();
     await _queueSubject.close();
     await _indexSubject.close();
