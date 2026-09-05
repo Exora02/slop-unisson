@@ -156,7 +156,11 @@ class SpotifyApi {
           .get(Uri.parse(url), headers: {'Authorization': 'Bearer $_access'});
     }
     if (resp.statusCode != 200) {
-      throw StateError('Spotify API HTTP ${resp.statusCode}');
+      // Keep Spotify's body: it carries the real reason (missing
+      // developer verification, invalid scopes, restricted endpoint…)
+      // which a bare status code cannot convey.
+      throw StateError('Spotify API HTTP ${resp.statusCode}: '
+          '${resp.body.length > 300 ? resp.body.substring(0, 300) : resp.body}');
     }
     return jsonDecode(resp.body) as Map<String, dynamic>;
   }

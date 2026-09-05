@@ -29,6 +29,15 @@ class ImportResult {
   const ImportResult({required this.fetched, required this.added});
 }
 
+/// Per-provider failure captured while listing importable playlists,
+/// so the UI can explain why a provider shows nothing instead of
+/// staying silent.
+class ImportProviderError {
+  final String providerId;
+  final String message;
+  const ImportProviderError(this.providerId, this.message);
+}
+
 /// Imports playlists and favorites from Qobuz/YTM into the local library.
 class ImportService {
   final QobuzProvider? qobuz;
@@ -39,9 +48,13 @@ class ImportService {
   ImportService(
       {this.qobuz, required this.ytm, this.spotify, required this.store});
 
+  /// Errors captured during the last listImportablePlaylists run.
+  final List<ImportProviderError> lastErrors = [];
+
   /// All playlists available for import across connected providers.
   Future<List<ImportablePlaylist>> listImportablePlaylists() async {
     final out = <ImportablePlaylist>[];
+    lastErrors.clear();
 
     if (qobuz != null && qobuz!.isConfigured) {
       try {
@@ -56,7 +69,9 @@ class ImportService {
             count: p.tracksCount,
           ));
         }
-      } catch (_) {}
+      } catch (e) {
+        lastErrors.add(ImportProviderError('qobuz', '$e'));
+      }
     }
 
     if (ytm.isLoggedIn) {
@@ -78,7 +93,9 @@ class ImportService {
           title: 'Liked Music',
           count: null,
         ));
-      } catch (_) {}
+      } catch (e) {
+        lastErrors.add(ImportProviderError('ytm', '$e'));
+      }
     }
 
     if (spotify != null && spotify!.isConfigured) {
@@ -99,7 +116,9 @@ class ImportService {
           title: 'Liked Songs',
           count: null,
         ));
-      } catch (_) {}
+      } catch (e) {
+        lastErrors.add(ImportProviderError('spotify', '$e'));
+      }
     }
 
     return out;

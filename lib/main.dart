@@ -25,7 +25,7 @@ import 'ui/import_sheet.dart';
 import 'ui/library_screen.dart';
 import 'ui/mini_player.dart';
 
-const appBuildTag = 'v0.5.2-spotify';
+const appBuildTag = 'v0.5.3-spotify';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -278,23 +278,33 @@ class _HomeScreenState extends State<HomeScreen> {
     final primary = Theme.of(context).colorScheme.primary;
     return Scaffold(
       appBar: AppBar(
+        titleSpacing: 12,
         title: Row(
           children: [
             const Icon(Icons.album_rounded),
-            const SizedBox(width: 10),
-            const Text('Unisson'),
-            const SizedBox(width: 6),
-            Text(appBuildTag,
-                style: const TextStyle(
-                    fontSize: 10, color: Colors.white38)),
-            const SizedBox(width: 12),
-            ..._providers.map((p) => Padding(
-                  padding: const EdgeInsets.only(right: 4),
-                  child: Chip(
-                    label: Text(p.id),
-                    visualDensity: VisualDensity.compact,
-                  ),
-                )),
+            const SizedBox(width: 8),
+            const Text('Unisson', overflow: TextOverflow.ellipsis),
+            const SizedBox(width: 8),
+            Expanded(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    for (final p in _providers)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 4),
+                        child: Chip(
+                          label: Text(p.id),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      ),
+                    Text(appBuildTag,
+                        style: const TextStyle(
+                            fontSize: 10, color: Colors.white38)),
+                  ],
+                ),
+              ),
+            ),
           ],
         ),
         actions: [

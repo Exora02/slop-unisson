@@ -105,6 +105,28 @@ class _ImportSheetState extends State<ImportSheet> {
             widget.importer.spotify!.isConfigured)
           _favTile('spotify', 'Spotify liked songs'),
         const Divider(height: 1),
+        if (widget.importer.lastErrors.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final e in widget.importer.lastErrors)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 6),
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF3B0A0A),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      '${e.providerId}: ${e.message}',
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                  ),
+              ],
+            ),
+          ),
         Expanded(
           child: FutureBuilder<List<ImportablePlaylist>>(
             future: _future,
