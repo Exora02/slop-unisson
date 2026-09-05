@@ -100,11 +100,10 @@ class YtmProvider implements MusicProvider {
         final req = await c.openUrl('GET', local);
         req.headers.set(HttpHeaders.rangeHeader, 'bytes=0-1');
         final resp = await req.close().timeout(const Duration(seconds: 15));
-        final bytes = await resp.first.timeout(const Duration(seconds: 15));
-        await resp.drain<void>().catchError((_) {});
+        final n = await resp.fold<int>(0, (a, d) => a + d.length);
         c.close();
         proxy.dispose();
-        return 'proxy ${resp.statusCode} ${bytes.length}B';
+        return 'proxy ${resp.statusCode} ${n}B';
       } catch (e) {
         proxy.dispose();
         final msg = e.toString();

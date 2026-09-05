@@ -42,27 +42,29 @@ class _Client {
 }
 
 // Ladder verified live on 2026-09-05 (probe: URL byte-fetch verified):
-// - ANDROID_MUSIC 7.16.51 + user cookie (SAPISIDHASH) -> full-quality
-//   opus streams. Skipped when not logged in.
+// - ANDROID_MUSIC 7.16.51: ROTTED — anonymous = LOGIN_REQUIRED,
+//   with user cookie = HTTP 400 invalid argument. Removed as a rung.
+//   (yt-dlp no longer ships an android_music spec either.)
 // - IOS 20.32.4 with FULL device context (deviceModel/osName/osVersion)
 //   -> direct AAC/opus URLs that actually serve bytes. A lean context
 //   (clientName+version only) gets status=OK but NO direct URLs —
 //   ciphered only. Device identity is mandatory, not cosmetic.
-// - ANDROID_VR 1.65.10: anonymous resolve works but has begun hitting
-//   the bot wall intermittently (LOGIN_REQUIRED). Kept as last-resort
-//   rung with device fields; the canary re-probes it daily.
+//   Fresh spare verified: 21.02.3 (phone diag showed IOS healthy on
+//   the user's network; device 206-verified).
+// - ANDROID_VR 1.65.10: LOGIN_REQUIRED bot wall — dead rung, kept
+//   only as the canary-rewrite anchor.
 const _clients = [
-  _Client(
-      'ANDROID_MUSIC',
-      '21',
-      '7.16.51',
-      _androidMusicKey,
-      34,
-      'com.google.android.apps.youtube.music/7.16.51 (Linux; U; Android 14; en_US) gzip',
-      auth: true),
+  // Primary anonymous rung. auth-capable spare sits right behind it:
+  // if IOS ever rots, this rung uses the user's cookie (SAPISIDHASH).
   _Client('IOS', '5', '20.32.4', _androidKey, 0,
       'com.google.ios.youtube/20.32.4 (iPhone16,2; U; CPU iOS 18_6 like Mac OS X;)',
       lean: true, deviceModel: 'iPhone16,2', osVersionOverride: '18.6.0'),
+  // Auth spare: identical client but attaches the user's SAPISIDHASH.
+  // Only tried when the anonymous rung fails AND the user is logged in.
+  _Client('IOS_AUTH', '5', '20.32.4', _androidKey, 0,
+      'com.google.ios.youtube/20.32.4 (iPhone16,2; U; CPU iOS 18_6 like Mac OS X;)',
+      lean: true, deviceModel: 'iPhone16,2', osVersionOverride: '18.6.0',
+      auth: true),
     // CANARY-MANAGED anonymous fallback: the ytm_ladder_canary cron rewrites
   // this entry from yt-dlp's current working spec when it rots.
   _Client('ANDROID_VR', '28', '1.65.10', _androidKey, 32,
