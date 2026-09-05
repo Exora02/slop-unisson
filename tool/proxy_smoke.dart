@@ -88,6 +88,35 @@ Future<void> main() async {
   proxy2.dispose();
   await up2.close(force: forceClose);
 
+  // --- T2b: explicit ua= param OVERRIDES the source default -------
+  print('T2b: UA override param');
+  String? seenUa2;
+  final up2b = await HttpServer.bind('127.0.0.1', 0);
+  up2b.listen((req) async {
+    seenUa2 = req.headers.value(HttpHeaders.userAgentHeader);
+    req.response.statusCode = 206;
+    req.response.headers.set(HttpHeaders.contentLengthHeader, '1');
+    req.response.add([1]);
+    await req.response.close();
+  });
+  final proxy2b = StreamProxy();
+  await proxy2b.start();
+  final url2b = proxy2b.proxyUrl(
+    sourceId: 'ytm',
+    trackId: 'v2',
+    originUrl: Uri.parse('http://127.0.0.1:${up2b.port}/a'),
+    userAgent: 'com.google.android.apps.youtube.music/7.16.51 (Linux; U; Android 14; en_US) gzip',
+  );
+  client = HttpClient();
+  req = await client.openUrl('GET', url2b);
+  resp = await req.close();
+  await resp.drain<void>();
+  check('ua param overrides default',
+      (seenUa2 ?? '').contains('youtube.music'));
+  client.close();
+  proxy2b.dispose();
+  await up2b.close(force: true);
+
   // --- T3: live upstream through proxy -----------------------------
   print('T3: live upstream fetch');
   final proxy3 = StreamProxy();

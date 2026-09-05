@@ -396,6 +396,7 @@ class UnissonAudioHandler extends BaseAudioHandler {
         trackId: track.id,
         originUrl: spec.uri,
         formatHint: source == 'qobuz' ? 27 : null,
+        userAgent: spec.userAgent,
       );
     }
     mediaItem.add(_toMediaItem(entry.track, track, spec));

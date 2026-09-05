@@ -81,6 +81,11 @@ class ResolvedStream {
   final String clientUsed;
   final DateTime expiresAt;
 
+  /// UA of the client that minted the URL. googlevideo binds media
+  /// fetches to the client identity — the proxy MUST fetch with this
+  /// exact UA or the CDN rejects with 403 (surfacing as error 0).
+  final String userAgent;
+
   ResolvedStream({
     required this.url,
     required this.itag,
@@ -90,6 +95,7 @@ class ResolvedStream {
     required this.contentLength,
     required this.clientUsed,
     required this.expiresAt,
+    required this.userAgent,
   });
 
   bool get isExpired => DateTime.now().isAfter(expiresAt);
@@ -284,6 +290,7 @@ class InnerTubeClient {
       contentLength: int.tryParse('${best['contentLength'] ?? ''}'),
       clientUsed: c.name,
       expiresAt: _parseExpiry(url),
+      userAgent: c.userAgent,
     );
   }
 
@@ -315,4 +322,5 @@ StreamSpec specFromResolved(ResolvedStream r) => StreamSpec(
       contentType: r.contentType,
       bitrate: r.bitrate,
       expiresAt: r.expiresAt,
+      userAgent: r.userAgent,
     );

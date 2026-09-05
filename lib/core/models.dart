@@ -70,6 +70,11 @@ class StreamSpec {
   final String? artwork;
   final String? album;
 
+  /// UA of the client that minted the stream URL. CDNs bind media
+  /// fetches to the client identity (googlevideo especially) — the
+  /// proxy fetches upstream with this, not its own default.
+  final String userAgent;
+
   const StreamSpec({
     required this.uri,
     required this.contentType,
@@ -79,5 +84,6 @@ class StreamSpec {
     this.expiresAt,
     this.artwork,
     this.album,
+    this.userAgent = 'Unisson/1.0',
   });
 }

@@ -59,12 +59,14 @@ class StreamProxy {
     required String trackId,
     required Uri originUrl,
     int? formatHint,
+    String? userAgent,
   }) =>
       Uri(scheme: 'http', host: '127.0.0.1', port: _port, pathSegments: [
         's', sourceId, trackId
       ], queryParameters: {
         'u': originUrl.toString(),
         if (formatHint != null) 'f': '$formatHint',
+        if (userAgent != null && userAgent.isNotEmpty) 'ua': userAgent,
       });
 
   Future<void> _onRequest(HttpRequest req) async {
@@ -81,10 +83,11 @@ class StreamProxy {
       var url = Uri.tryParse(req.uri.queryParameters['u'] ?? '');
       final hint = int.tryParse(req.uri.queryParameters['f'] ?? '');
       final range = req.headers.value(HttpHeaders.rangeHeader);
+      final ua = req.uri.queryParameters['ua'];
 
       for (var attempt = 0; attempt < 3; attempt++) {
         if (url == null) break;
-        final upstream = await _fetchUpstream(url, range, sourceId);
+        final upstream = await _fetchUpstream(url, range, sourceId, ua);
         if (upstream != null) {
           res.statusCode = upstream.statusCode;
           upstream.headers.forEach((name, values) {
@@ -115,6 +118,7 @@ class StreamProxy {
         if (url == null) break;
       }
       res.statusCode = HttpStatus.notFound;
+      res.write('proxy: upstream exhausted (source=$sourceId id=$trackId)');
       await res.close();
     } catch (_) {
       try { await res.close(); } catch (_) {}
@@ -122,14 +126,14 @@ class StreamProxy {
   }
 
   Future<HttpClientResponse?> _fetchUpstream(
-      Uri url, String? range, String sourceId) async {
+      Uri url, String? range, String sourceId, String? uaOverride) async {
     try {
       final req = await _client.openUrl('GET', url);
       req.followRedirects = true;
       if (range != null && range.isNotEmpty) {
         req.headers.set(HttpHeaders.rangeHeader, range);
       }
-      final ua = _userAgentFor(sourceId);
+      final ua = uaOverride ?? _userAgentFor(sourceId);
       if (ua != null) req.headers.set(HttpHeaders.userAgentHeader, ua);
       final resp = await req.close();
       if (resp.statusCode == HttpStatus.ok ||
