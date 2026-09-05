@@ -1,8 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
-
 /// Local HTTP stream proxy (NewPipe/InnerTune pattern).
 ///
 /// The player is pointed at 127.0.0.1:<port> instead of the CDN. The
@@ -17,10 +15,17 @@ import 'package:flutter/foundation.dart';
 ///  - Qobuz CDN cutting the connection when the stream token expires
 ///    mid-track (music dies before the song ends)
 class StreamProxy {
-  final _client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+  // autoUncompress=false: bytes must flow through VERBATIM. With the
+  // default (true) Dart decompresses gzip bodies while the upstream
+  // content-encoding/-length headers are copied along — the client
+  // then reads fewer bytes than promised and dies mid-stream.
+  final _client = HttpClient()
+    ..autoUncompress = false
+    ..connectionTimeout = const Duration(seconds: 15);
 
   HttpServer? _server;
   int _port = 0;
+  Future<int>? _starting;
 
   /// Fresh-URL resolvers by source id, registered at startup. Given the
   /// track id (and format hint) they return a new playable upstream URL.
@@ -32,15 +37,19 @@ class StreamProxy {
     _resolvers[sourceId] = fn;
   }
 
-  Future<int> start() async {
-    if (_server != null) return _port;
+  /// Memoized so callers can safely await on every playback — the first
+  /// call binds, later calls return immediately. Without this, a track
+  /// loading before the bind completed got a port-0 URL and died.
+  Future<int> start() => _starting ??= _bind();
+
+  Future<int> _bind() async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     _server = server;
     _port = server.port;
     server.listen((req) {
       _onRequest(req);
     }, onError: (Object e) {
-      debugPrint('stream_proxy: server error $e');
+      // server-level failures must never take the app down
     });
     return _port;
   }

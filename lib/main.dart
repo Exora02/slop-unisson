@@ -25,7 +25,7 @@ import 'ui/import_sheet.dart';
 import 'ui/library_screen.dart';
 import 'ui/mini_player.dart';
 
-const appBuildTag = 'v0.5.7-proxy';
+const appBuildTag = 'v0.5.8-proxy2';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

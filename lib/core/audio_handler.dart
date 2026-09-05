@@ -386,14 +386,18 @@ class UnissonAudioHandler extends BaseAudioHandler {
     // Stream through the local proxy: it re-resolves expired tokens
     // (Qobuz mid-track death) and sends the client identity the CDN
     // minted the URL for (googlevideo "playback error 0" fix).
-    final playUri = source == 'ytm' || source == 'qobuz'
-        ? proxy.proxyUrl(
-            sourceId: source,
-            trackId: track.id,
-            originUrl: spec.uri,
-            formatHint: source == 'qobuz' ? 27 : null,
-          )
-        : spec.uri;
+    // Awaiting start() is cheap after the first call (memoized) and
+    // guarantees a bound port before the URL is built.
+    var playUri = spec.uri;
+    if (source == 'ytm' || source == 'qobuz') {
+      await proxy.start();
+      playUri = proxy.proxyUrl(
+        sourceId: source,
+        trackId: track.id,
+        originUrl: spec.uri,
+        formatHint: source == 'qobuz' ? 27 : null,
+      );
+    }
     mediaItem.add(_toMediaItem(entry.track, track, spec));
 
     _enrichInBackground(entry);
