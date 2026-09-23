@@ -19,6 +19,10 @@ class SpotifyEngine {
   String? deviceId;
   bool deviceReady = false;
   bool accountError = false;
+
+  /// Scopes decoded from the access token inside the WebView (what the
+  /// SDK actually received) — end of the scope chain of custody.
+  String? grantedBySdk;
   Future<bool>? _booting;
 
   SpotifyEngine({
@@ -53,6 +57,9 @@ class SpotifyEngine {
               deviceReady = true;
               accountError = false;
               onLog('spotify device up');
+            } else if (type == 'token_scopes') {
+              grantedBySdk = '${j['scopes']}';
+              onLog('spotify token scopes: ${j['scopes']}');
             } else if (type == 'auth_error') {
               onLog('spotify SDK auth error: ${j['message']}');
             } else if (type == 'player_error') {

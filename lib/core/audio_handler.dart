@@ -536,9 +536,14 @@ class UnissonAudioHandler extends BaseAudioHandler {
     );
     engineNotifier.value = engine;
     if (!engine.isReady && !await engine.ensureBooted()) {
-      // Distinguish the three failure modes for the banner.
+      // Distinguish the failure modes, with the full scope chain.
       final scopes = sp.api.grantedScopes;
-      if (scopes == null || !scopes.contains('streaming')) {
+      final sdkScopes = engine.grantedBySdk;
+      if (sdkScopes != null && !sdkScopes.contains('streaming')) {
+        needsSpotifyRelogin = true;
+        _errorSubject.add('Spotify token missing streaming (SDK saw: '
+            '$sdkScopes) — disconnect & reconnect');
+      } else if (scopes == null || !scopes.contains('streaming')) {
         needsSpotifyRelogin = true;
         _errorSubject.add('Spotify token lacks streaming permission — '
             'disconnect & reconnect Spotify once (old grants never gain '

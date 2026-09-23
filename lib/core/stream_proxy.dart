@@ -210,6 +210,14 @@ window.__deliverToken = function (t) {
   window.__tok = t;
   var w = window.__tokWaiters.splice(0);
   for (var i = 0; i < w.length; i++) w[i](t);
+  try {
+    var payload = JSON.parse(atob(t));
+    window.spbridge && window.spbridge.postMessage(JSON.stringify(
+        {type: 'token_scopes', scopes: payload.scope || 'NO-SCOPE-FIELD'}));
+  } catch (e) {
+    window.spbridge && window.spbridge.postMessage(JSON.stringify(
+        {type: 'token_scopes', scopes: 'UNDECODABLE'}));
+  }
 };
 window.onSpotifyWebPlaybackSDKReady = function () {
   var bridge = function (obj) {
