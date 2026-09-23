@@ -75,6 +75,11 @@ class SpotifyApi {
 
   String? _access;
 
+  /// Space-separated scopes of the CURRENT grant (from token response).
+  /// Refresh tokens keep their original scopes forever — if 'streaming'
+  /// is absent here, only a fresh login on this build can add it.
+  String? grantedScopes;
+
   /// Current access token, refreshed if needed. For the Web Playback
   /// SDK WebView, which mints its own session from this.
   Future<String?> accessToken() async {
@@ -100,6 +105,7 @@ class SpotifyApi {
       _access = j['access'] as String?;
       _refresh = j['refresh'] as String?;
       _expiresAtMs = (j['expiresAt'] as num?)?.toInt() ?? 0;
+      grantedScopes = j['scopes'] as String?;
     } catch (_) {}
   }
 
@@ -126,13 +132,19 @@ class SpotifyApi {
 
   void _applyToken(Map<String, dynamic> j) {
     _access = j['access_token'] as String?;
+    final s = j['scope'] as String?;
+    if (s != null && s.isNotEmpty) grantedScopes = s;
     final r = j['refresh_token'] as String?;
     if (r != null) _refresh = r;
     final inS = (j['expires_in'] as num?)?.toInt() ?? 3600;
     _expiresAtMs =
         DateTime.now().millisecondsSinceEpoch + inS * 1000 - 60000;
-    saveToken(jsonEncode(
-        {'access': _access, 'refresh': _refresh, 'expiresAt': _expiresAtMs}));
+    saveToken(jsonEncode({
+      'access': _access,
+      'refresh': _refresh,
+      'expiresAt': _expiresAtMs,
+      if (grantedScopes != null) 'scopes': grantedScopes,
+    }));
   }
 
   Future<void> _ensureToken() async {

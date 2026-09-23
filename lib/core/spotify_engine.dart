@@ -12,16 +12,19 @@ import 'package:webview_flutter/webview_flutter.dart';
 class SpotifyEngine {
   final Future<String?> Function() loadAccessToken;
   final Future<int> Function() loadPort;
+  final String? Function() reportedScopes;
   final void Function(String line) onLog;
 
   WebViewController? controller;
   String? deviceId;
   bool deviceReady = false;
+  bool accountError = false;
   Future<bool>? _booting;
 
   SpotifyEngine({
     required this.loadAccessToken,
     required this.loadPort,
+    required this.reportedScopes,
     required this.onLog,
   });
 
@@ -50,6 +53,7 @@ class SpotifyEngine {
           } else if (type == 'auth_error') {
             onLog('spotify SDK auth error: ${j['message']}');
           } else if (type == 'player_error') {
+            accountError = true;
             onLog('spotify SDK player error: ${j['message']}');
           }
         } catch (_) {}

@@ -53,6 +53,10 @@ class UnissonAudioHandler extends BaseAudioHandler {
   SpotifyEngine? _spotifyEngine;
   final engineNotifier = ValueNotifier<SpotifyEngine?>(null);
 
+  /// Set when Spotify rejects the session in a way only a fresh login
+  /// fixes (missing streaming scope). The login screen checks it.
+  bool needsSpotifyRelogin = false;
+
   /// Active Spotify playback session: track id being played + the
   /// position/ended poller that keeps the UI in sync.
   String? _spotifyTrackId;
@@ -498,14 +502,16 @@ class UnissonAudioHandler extends BaseAudioHandler {
   Future<bool> _startSpotifyPlayback(String trackId, int gen) async {
     final sp = _spotify;
     if (sp == null) {
-      _errorSubject.add('Spotify not connected (Premium required for '
-          'native playback)');
+      needsSpotifyRelogin = true;
+      _errorSubject.add('Spotify not connected (Premium + relogin '
+          'required for native playback)');
       return false;
     }
     // stop just_audio so the two engines never play over each other
     await _player.pause();
     SpotifyEngine engine = _spotifyEngine ??= SpotifyEngine(
       loadAccessToken: () => sp.api.accessToken(),
+      reportedScopes: () => sp.api.grantedScopes,
       loadPort: () async {
         await proxy.start();
         return proxy.port;
@@ -514,8 +520,20 @@ class UnissonAudioHandler extends BaseAudioHandler {
     );
     engineNotifier.value = engine;
     if (!engine.isReady && !await engine.ensureBooted()) {
-      _errorSubject.add('Spotify device failed to start — Premium '
-          'required (or WebView blocked)');
+      // Distinguish the three failure modes for the banner.
+      final scopes = sp.api.grantedScopes;
+      if (scopes == null || !scopes.contains('streaming')) {
+        needsSpotifyRelogin = true;
+        _errorSubject.add('Spotify token lacks streaming permission — '
+            'disconnect & reconnect Spotify once (old grants never gain '
+            'new permissions automatically)');
+      } else if (engine.accountError) {
+        _errorSubject.add('Spotify says Premium required — account or '
+            'device registration refused');
+      } else {
+        _errorSubject.add('Spotify device failed to start — WebView '
+            'blocked or network refused');
+      }
       return false;
     }
     if (gen != _loadGen) return false; // superseded while booting
