@@ -57,6 +57,9 @@ class UnissonAudioHandler extends BaseAudioHandler {
   /// fixes (missing streaming scope). The login screen checks it.
   bool needsSpotifyRelogin = false;
 
+  /// One-shot latch for the 404 device-reboot retry.
+  bool _spotifyRetried = false;
+
   /// Active Spotify playback session: track id being played + the
   /// position/ended poller that keeps the UI in sync.
   String? _spotifyTrackId;
@@ -497,6 +500,19 @@ class UnissonAudioHandler extends BaseAudioHandler {
     return null;
   }
 
+  /// Drop the SDK device so the next Spotify play boots with the
+  /// CURRENT token (call after a fresh login).
+  Future<void> resetSpotifyEngine() async {
+    _spotifyPoll?.cancel();
+    _spotifyTrackId = null;
+    final e = _spotifyEngine;
+    _spotifyEngine = null;
+    engineNotifier.value = null;
+    needsSpotifyRelogin = false;
+    _spotifyRetried = false;
+    if (e != null) e.dispose();
+  }
+
   /// Play [trackId] on the headless Spotify Connect device. Boots the
   /// WebView engine on first use; subsequent plays are instant.
   Future<bool> _startSpotifyPlayback(String trackId, int gen) async {
@@ -543,6 +559,20 @@ class UnissonAudioHandler extends BaseAudioHandler {
       _startSpotifyPoller();
       return true;
     } catch (e) {
+      // 404: device vanished (WebView recycled). One reboot retry.
+      final msg = e.toString();
+      if (msg.contains('404') && !_spotifyRetried) {
+        _spotifyRetried = true;
+        final ok = await engine.reboot();
+        if (ok && gen == _loadGen) {
+          try {
+            await sp.api.playUri(engine.deviceId!, 'spotify:track:$trackId');
+            _spotifyTrackId = trackId;
+            _startSpotifyPoller();
+            return true;
+          } catch (_) {}
+        }
+      }
       _errorSubject.add('Spotify play failed: $e');
       return false;
     }

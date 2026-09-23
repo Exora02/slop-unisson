@@ -27,7 +27,7 @@ import 'ui/import_sheet.dart';
 import 'ui/library_screen.dart';
 import 'ui/mini_player.dart';
 
-const appBuildTag = 'v0.5.14-scopediag';
+const appBuildTag = 'v0.5.15-spotifyfix';
 
 /// Global handle to the audio handler, set when the service starts so
 /// the Spotify host widget can reach the engine notifier.
@@ -282,7 +282,15 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
-    if (ok == true && mounted) setState(() {});
+    if (ok == true && mounted) {
+      // A fresh grant invalidates any booted SDK device (old token).
+      // Drop the engine so the next Spotify play boots clean.
+      try {
+        final h = await _handlerFuture;
+        await h.resetSpotifyEngine();
+      } catch (_) {}
+      setState(() {});
+    }
   }
 
   Future<void> _disconnectSpotify() async {

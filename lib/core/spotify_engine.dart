@@ -37,35 +37,57 @@ class SpotifyEngine {
       });
 
   Future<bool> _boot() async {
-    final port = await loadPort();
-    final c = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..addJavaScriptChannel('spbridge', onMessageReceived: (m) {
-        try {
-          final j = jsonDecode(m.message) as Map<String, dynamic>;
-          final type = '${j['type']}';
-          if (type == 'token_req') {
-            _deliverToken();
-          } else if (type == 'device_ready') {
-            deviceId = '${j['deviceId']}';
-            deviceReady = true;
-            onLog('spotify device up');
-          } else if (type == 'auth_error') {
-            onLog('spotify SDK auth error: ${j['message']}');
-          } else if (type == 'player_error') {
-            accountError = true;
-            onLog('spotify SDK player error: ${j['message']}');
-          }
-        } catch (_) {}
-      })
-      ..loadRequest(Uri.parse('http://127.0.0.1:$port/spotify-host'));
-    controller = c;
+    var c = controller;
+    if (c == null) {
+      final port = await loadPort();
+      c = WebViewController()
+        ..setJavaScriptMode(JavaScriptMode.unrestricted)
+        ..addJavaScriptChannel('spbridge', onMessageReceived: (m) {
+          try {
+            final j = jsonDecode(m.message) as Map<String, dynamic>;
+            final type = '${j['type']}';
+            if (type == 'token_req') {
+              _deliverToken();
+            } else if (type == 'device_ready') {
+              deviceId = '${j['deviceId']}';
+              deviceReady = true;
+              accountError = false;
+              onLog('spotify device up');
+            } else if (type == 'auth_error') {
+              onLog('spotify SDK auth error: ${j['message']}');
+            } else if (type == 'player_error') {
+              accountError = true;
+              onLog('spotify SDK player error: ${j['message']}');
+            }
+          } catch (_) {}
+        })
+        ..loadRequest(Uri.parse('http://127.0.0.1:$port/spotify-host'));
+      controller = c;
+    } else {
+      // existing controller: reload the host page so the SDK restarts
+      // and asks for the CURRENT token (stale-boot fix after relogin)
+      deviceReady = false;
+      deviceId = null;
+      try {
+        await c.reload();
+      } catch (_) {}
+    }
     final deadline = DateTime.now().add(const Duration(seconds: 25));
     while (DateTime.now().isBefore(deadline)) {
       if (isReady) return true;
       await Future<void>.delayed(const Duration(milliseconds: 250));
     }
+    // A failed boot must be retryable — drop the memo so the next
+    // ensureBooted() actually re-boots instead of replaying false.
+    _booting = null;
     return isReady;
+  }
+
+  /// Full restart after a re-login: reloads the host page (fresh JS,
+  /// fresh getOAuthToken round-trip) and waits for device_ready.
+  Future<bool> reboot() {
+    _booting = null;
+    return ensureBooted();
   }
 
   Future<void> _deliverToken() async {
