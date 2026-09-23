@@ -5,8 +5,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 import 'core/audio_handler.dart';
+import 'core/spotify_engine.dart';
 import 'core/models.dart';
 import 'core/provider.dart';
 import 'core/import_service.dart';
@@ -25,7 +27,11 @@ import 'ui/import_sheet.dart';
 import 'ui/library_screen.dart';
 import 'ui/mini_player.dart';
 
-const appBuildTag = 'v0.5.12-enrich';
+const appBuildTag = 'v0.5.13-spotify';
+
+/// Global handle to the audio handler, set when the service starts so
+/// the Spotify host widget can reach the engine notifier.
+UnissonAudioHandler? _rootHandler;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -74,8 +80,69 @@ class _UnissonAppState extends State<UnissonApp> {
         colorSchemeSeed: const Color(0xFFEC8603),
         useMaterial3: true,
       ),
-      home: HomeScreen(crashes: _crashes),
+      home: _SpotifyHost(
+        child: HomeScreen(crashes: _crashes),
+      ),
     );
+  }
+}
+
+/// Wraps the app so the Spotify engine's WebView (if booted) stays
+/// mounted at 1x1 for its whole lifetime. Listens to the handler's
+/// engine notifier; without a mount, Android suspends the WebView's
+/// JS and the Connect device dies.
+class _SpotifyHost extends StatefulWidget {
+  final Widget child;
+  const _SpotifyHost({required this.child});
+
+  @override
+  State<_SpotifyHost> createState() => _SpotifyHostState();
+}
+
+class _SpotifyHostState extends State<_SpotifyHost> {
+  SpotifyEngine? _engine;
+
+  @override
+  void initState() {
+    super.initState();
+    _attach();
+  }
+
+  void _attach() async {
+    // handler is created at app start; its notifier outlives this
+    // widget. Listen for a late-booting engine too.
+    final h = _rootHandler;
+    if (h == null) {
+      // service not up yet — retry shortly after first frame
+      await Future<void>.delayed(const Duration(milliseconds: 1500));
+    }
+    final handler = h ?? _rootHandler;
+    if (handler == null || !mounted) return;
+    handler.engineNotifier.addListener(_onEngine);
+    _onEngine();
+  }
+
+  void _onEngine() {
+    final h = _rootHandler;
+    if (h == null || !mounted) return;
+    final e = h.engineNotifier.value;
+    if (e != _engine) setState(() => _engine = e);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = _engine?.controller;
+    return Stack(children: [
+      widget.child,
+      if (c != null)
+        Positioned(
+          left: 0,
+          top: 0,
+          width: 1,
+          height: 1,
+          child: WebViewWidget(controller: c),
+        ),
+    ]);
   }
 }
 
@@ -165,6 +232,7 @@ class _HomeScreenState extends State<HomeScreen> {
     handler.errorStream.listen((msg) {
       if (mounted) setState(() => _error = msg);
     });
+    _rootHandler = handler;
     return handler;
   }
 

@@ -28,12 +28,15 @@ class SpotifyProvider implements MusicProvider {
 
   @override
   Future<StreamSpec> resolveStream(Track track, QualityPref pref) async {
-    // Spotify ships no stream URLs (Web API). Playback of imported
-    // content happens by enriching the track with other sources at
-    // play time (see audio handler); native playback is a separate
-    // phase (Web Playback SDK, Premium).
-    throw UnsupportedError(
-        'Spotify has no direct streams — enrich from other sources');
+    // No raw stream URLs exist in Spotify's Web API. This marker spec
+    // tells the audio handler to route the track to the headless Web
+    // Playback SDK device instead of just_audio. Never reaches the
+    // player itself — _loadCurrent intercepts source == 'spotify'.
+    return StreamSpec(
+      uri: Uri.parse('spotify:track:${track.id}'),
+      contentType: 'application/x-spotify-track',
+      userAgent: 'Unisson/1.0',
+    );
   }
 
   /// Devices currently registered for playback (Web Playback SDK

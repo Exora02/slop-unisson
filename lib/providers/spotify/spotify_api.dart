@@ -74,6 +74,13 @@ class SpotifyApi {
   final _http = http.Client();
 
   String? _access;
+
+  /// Current access token, refreshed if needed. For the Web Playback
+  /// SDK WebView, which mints its own session from this.
+  Future<String?> accessToken() async {
+    await _ensureToken();
+    return _access;
+  }
   String? _refresh;
   int _expiresAtMs = 0;
   bool _restored = false;
@@ -220,6 +227,23 @@ class SpotifyApi {
     );
     if (resp.statusCode != 204 && resp.statusCode != 403) {
       throw StateError('Spotify pause failed: HTTP ${resp.statusCode}');
+    }
+  }
+
+  /// Resume on the active device. Premium-gated.
+  Future<void> resume() async {
+    await _ensureToken();
+    final resp = await _http.put(
+      Uri.parse('$_apiBase/me/player/play'),
+      headers: {
+        'Authorization': 'Bearer $_access',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({}),
+    );
+    if (resp.statusCode != 204 && resp.statusCode != 403) {
+      // 403 when nothing is playing — treat as deferred, not fatal
+      throw StateError('Spotify resume failed: HTTP ${resp.statusCode}');
     }
   }
 

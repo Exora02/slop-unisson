@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart';
+import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:just_audio/just_audio.dart';
 import 'package:rxdart/rxdart.dart';
 
@@ -9,8 +10,10 @@ import 'library_service.dart';
 import 'library_store.dart';
 import 'models.dart';
 import '../providers/qobuz/qobuz_provider.dart' show QobuzProvider;
+import '../providers/spotify/spotify_provider.dart' show SpotifyProvider;
 import '../providers/ytm/ytm_provider.dart' show YtmProvider;
 import 'queue.dart';
+import 'spotify_engine.dart';
 import 'stream_proxy.dart';
 
 /// Central playback service: owns the queue, resolves streams with
@@ -43,6 +46,23 @@ class UnissonAudioHandler extends BaseAudioHandler {
   /// Library persistence, used to write back source enrichment results.
   /// Nullable only so tests/factories without a store still work.
   final Future<LibraryStore>? storeFuture;
+
+  /// Headless Spotify Connect device (Web Playback SDK in a 1x1
+  /// WebView). Created lazily on first Spotify track. The notifier
+  /// lets the widget tree mount its WebView when it appears.
+  SpotifyEngine? _spotifyEngine;
+  final engineNotifier = ValueNotifier<SpotifyEngine?>(null);
+
+  /// Active Spotify playback session: track id being played + the
+  /// position/ended poller that keeps the UI in sync.
+  String? _spotifyTrackId;
+  Timer? _spotifyPoll;
+  bool _spotifyPlaying = false;
+  int _spotifyPosMs = 0;
+  int _spotifyDurMs = 0;
+
+  /// Whether a Spotify Web Playback SDK session is currently active.
+  bool get _spotifyActive => _spotifyTrackId != null;
 
   final _player = AudioPlayer();
   final _queue = UnissonQueue();
@@ -276,19 +296,60 @@ class UnissonAudioHandler extends BaseAudioHandler {
   // ---------- BaseAudioHandler media controls ----------
 
   @override
-  Future<void> play() => _player.play();
+  Future<void> play() async {
+    if (_spotifyActive) {
+      final sp = _spotify;
+      if (sp != null) {
+        try {
+          await sp.api.resume();
+          _spotifyPlaying = true;
+          _broadcastSpotifyState(_spotifyPosMs, _spotifyDurMs);
+        } catch (_) {}
+      }
+      return;
+    }
+    await _player.play();
+  }
 
   @override
-  Future<void> pause() => _player.pause();
+  Future<void> pause() async {
+    if (_spotifyActive) {
+      final sp = _spotify;
+      if (sp != null) {
+        try {
+          await sp.api.pause();
+          _spotifyPlaying = false;
+          _broadcastSpotifyState(_spotifyPosMs, _spotifyDurMs);
+          return;
+        } catch (_) {}
+      }
+      return;
+    }
+    await _player.pause();
+  }
 
   @override
   Future<void> stop() async {
+    _spotifyPoll?.cancel();
+    _spotifyTrackId = null;
     await _player.stop();
     await super.stop();
   }
 
   @override
-  Future<void> seek(Duration position) => _player.seek(position);
+  Future<void> seek(Duration position) async {
+    if (_spotifyActive) {
+      final sp = _spotify;
+      if (sp != null) {
+        try {
+          await sp.api.seek(position.inMilliseconds);
+          _spotifyPosMs = position.inMilliseconds;
+        } catch (_) {}
+      }
+      return;
+    }
+    await _player.seek(position);
+  }
 
   @override
   Future<void> skipToNext() async {
@@ -391,6 +452,15 @@ class UnissonAudioHandler extends BaseAudioHandler {
           artwork: spec.artwork, album: spec.album));
     }
 
+    // ---- Spotify native path: Web Playback SDK device ----
+    if (source == 'spotify') {
+      final ok = await _startSpotifyPlayback(track.id, gen);
+      if (ok) return;
+      // fall through to error path — _startSpotifyPlayback logged it
+      _lastLoadFailed = true;
+      return;
+    }
+
     // Stream through the local proxy: it re-resolves expired tokens
     // (Qobuz mid-track death) and sends the client identity the CDN
     // minted the URL for (googlevideo "playback error 0" fix).
@@ -412,6 +482,115 @@ class UnissonAudioHandler extends BaseAudioHandler {
     _enrichInBackground(entry);
 
     await _applySource(playUri, autoplay: autoplay, resumeAt: resumeAt, gen: gen);
+  }
+
+  // ---------- Spotify Web Playback SDK path ----------
+
+  SpotifyProvider? get _spotify {
+    for (final p in library.providers) {
+      if (p is SpotifyProvider && p.isConfigured) return p;
+    }
+    return null;
+  }
+
+  /// Play [trackId] on the headless Spotify Connect device. Boots the
+  /// WebView engine on first use; subsequent plays are instant.
+  Future<bool> _startSpotifyPlayback(String trackId, int gen) async {
+    final sp = _spotify;
+    if (sp == null) {
+      _errorSubject.add('Spotify not connected (Premium required for '
+          'native playback)');
+      return false;
+    }
+    // stop just_audio so the two engines never play over each other
+    await _player.pause();
+    SpotifyEngine engine = _spotifyEngine ??= SpotifyEngine(
+      loadAccessToken: () => sp.api.accessToken(),
+      loadPort: () async {
+        await proxy.start();
+        return proxy.port;
+      },
+      onLog: (l) => _errorSubject.add('spotify: $l'),
+    );
+    engineNotifier.value = engine;
+    if (!engine.isReady && !await engine.ensureBooted()) {
+      _errorSubject.add('Spotify device failed to start — Premium '
+          'required (or WebView blocked)');
+      return false;
+    }
+    if (gen != _loadGen) return false; // superseded while booting
+    try {
+      await sp.api.playUri(engine.deviceId!, 'spotify:track:$trackId');
+      _spotifyTrackId = trackId;
+      _startSpotifyPoller();
+      return true;
+    } catch (e) {
+      _errorSubject.add('Spotify play failed: $e');
+      return false;
+    }
+  }
+
+  /// Poll the Web API for position/ended while a Spotify track plays —
+  /// just_audio knows nothing about this session, so the UI syncs
+  /// through here.
+  void _startSpotifyPoller() {
+    _spotifyPoll?.cancel();
+    _spotifyTrackId = _queue.current?.track.sources['spotify']?.id ??
+        _spotifyTrackId;
+    _spotifyPoll = Timer.periodic(const Duration(seconds: 2), (t) async {
+      final sp = _spotify;
+      final tid = _spotifyTrackId;
+      if (sp == null || tid == null) {
+        t.cancel();
+        return;
+      }
+      try {
+        final st = await sp.api.getPlaybackState();
+        if (st == null) return;
+        final pos = ((st['progress_ms'] as num?) ?? 0).toInt();
+        final item = st['item'] as Map<String, dynamic>?;
+        final dur = item != null
+            ? ((item['duration_ms'] as num?) ?? 0).toInt()
+            : 0;
+        final playing = st['is_playing'] == true;
+        _spotifyPosMs = pos;
+        _spotifyPlaying = playing;
+        _broadcastSpotifyState(pos, dur);
+        if (dur > 0 && pos >= dur - 1500) {
+          t.cancel();
+          _onSpotifyEnded();
+        }
+      } catch (_) {}
+    });
+  }
+
+  void _onSpotifyEnded() {
+    _spotifyTrackId = null;
+    if (_queue.advance()) {
+      _broadcastQueue();
+      _loadCurrent(autoplay: true);
+    }
+  }
+
+  void _broadcastSpotifyState(int posMs, int durMs) {
+    playbackState.add(playbackState.value.copyWith(
+      controls: [
+        MediaControl.skipToPrevious,
+        if (_spotifyPlaying) MediaControl.pause else MediaControl.play,
+        MediaControl.skipToNext,
+      ],
+      updatePosition: Duration(milliseconds: posMs),
+      bufferedPosition: Duration(milliseconds: posMs),
+      playing: _spotifyPlaying,
+    ));
+    if (durMs > 0 && _spotifyDurMs != durMs) {
+      _spotifyDurMs = durMs;
+      final cur = mediaItem.value;
+      if (cur != null) {
+        mediaItem.add(cur.copyWith(
+            duration: Duration(milliseconds: durMs)));
+      }
+    }
   }
 
   /// Single-flight around just_audio's setAudioSource. Overlapping calls here
@@ -449,6 +628,13 @@ class UnissonAudioHandler extends BaseAudioHandler {
     _applyGen = gen;
     _applyDeadline = DateTime.now().add(const Duration(seconds: 45));
     try {
+      // Spotify marker specs never reach just_audio — the Web Playback
+      // SDK path handles those before we get here. Belt and suspenders.
+      if (uri.scheme == 'spotify') {
+        _lastApplyError = 'spotify marker reached just_audio';
+        _errorSubject.add(_lastApplyError!);
+        return;
+      }
       if (gen != _loadGen) return;
       await _player.setAudioSource(
         AudioSource.uri(uri),

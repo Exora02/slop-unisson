@@ -25,6 +25,9 @@ class StreamProxy {
 
   HttpServer? _server;
   int _port = 0;
+
+  /// Bound loopback port (0 until started).
+  int get port => _port;
   Future<int>? _starting;
 
   /// Fresh-URL resolvers by source id, registered at startup. Given the
@@ -73,6 +76,15 @@ class StreamProxy {
     final res = req.response;
     try {
       final segs = req.uri.pathSegments;
+      // Spotify Web Playback SDK host page: served locally so the
+      // WebView gets a secure context (127.0.0.1 is trusted) for EME.
+      if (segs.length == 1 && segs[0] == 'spotify-host') {
+        res.statusCode = HttpStatus.ok;
+        res.headers.contentType = ContentType.html;
+        res.write(SpotifyHostPage.html);
+        await res.close();
+        return;
+      }
       if (segs.length < 3 || segs[0] != 's') {
         res.statusCode = HttpStatus.badRequest;
         await res.close();
@@ -180,4 +192,56 @@ class StreamProxy {
     _server?.close(force: true);
     _client.close(force: true);
   }
+}
+
+/// Spotify Web Playback SDK host page served from the loopback proxy.
+/// Loopback HTTP counts as a secure context in WebViews, so EME (the
+/// DRM handshake the SDK needs) works without HTTPS.
+class SpotifyHostPage {
+  static const html = '''
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Unisson Spotify Host</title>
+<script>
+window.__tok = null; window.__tokWaiters = [];
+window.__deliverToken = function (t) {
+  window.__tok = t;
+  var w = window.__tokWaiters.splice(0);
+  for (var i = 0; i < w.length; i++) w[i](t);
+};
+window.onSpotifyWebPlaybackSDKReady = function () {
+  var bridge = function (obj) {
+    window.spbridge && window.spbridge.postMessage(JSON.stringify(obj));
+  };
+  bridge({type: 'js_ready'});
+  var player = new Spotify.Player({
+    name: 'Unisson',
+    volume: 1.0,
+    getOAuthToken: function (cb) {
+      if (window.__tok) cb(window.__tok);
+      else { window.__tokWaiters.push(cb); bridge({type: 'token_req'}); }
+    }
+  });
+  player.addListener('ready', function (d) {
+    bridge({type: 'device_ready', deviceId: d.device_id});
+  });
+  player.addListener('authentication_error', function (e) {
+    bridge({type: 'auth_error', message: e.message});
+  });
+  player.addListener('initialization_error', function (e) {
+    bridge({type: 'player_error', message: e.message});
+  });
+  player.addListener('account_error', function (e) {
+    bridge({type: 'player_error', message: 'account: ' + e.message});
+  });
+  player.connect();
+};
+</script>
+<script src="https://sdk.scdn.co/spotify-player.js"></script>
+</head>
+<body></body>
+</html>
+''';
 }

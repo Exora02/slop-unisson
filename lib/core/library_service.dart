@@ -29,7 +29,8 @@ class MergedTrack {
   String get bestSourceId {
     final sourceIds = sources.keys;
     if (sourceIds.isEmpty) return '?';
-    // preference order
+    // preference order (spotify native last: Web-Playback-SDK audio is
+    // capped at ~160kbps, qobuz/ytm can beat it when present)
     const order = ['local', 'qobuz', 'ytm', 'tidal', 'spotify'];
     for (final o in order) {
       if (sources.containsKey(o)) return o;

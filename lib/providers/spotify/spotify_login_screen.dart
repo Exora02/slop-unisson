@@ -39,7 +39,7 @@ class _SpotifyLoginScreenState extends State<SpotifyLoginScreen> {
         '&response_type=code'
         '&redirect_uri=${Uri.encodeComponent(spotifyRedirectUri)}'
         '&scope=${Uri.encodeComponent('playlist-read-private user-library-read '
-            'user-read-playback-state user-modify-playback-state '
+            'streaming user-read-playback-state user-modify-playback-state '
             'user-read-currently-playing')}'
         '&code_challenge_method=S256'
         '&code_challenge=$_challenge'
