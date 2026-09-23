@@ -165,6 +165,91 @@ class SpotifyApi {
     return jsonDecode(resp.body) as Map<String, dynamic>;
   }
 
+  /// Devices currently registered for playback (Web Playback SDK
+  /// instances show up here once connected). Premium-gated.
+  Future<List<Map<String, dynamic>>> getDevices() async {
+    final j = await _get('$_apiBase/me/player/devices');
+    return (j['devices'] as List<dynamic>? ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .map((d) => Map<String, dynamic>.from(d))
+        .toList();
+  }
+
+  /// Move active playback to [deviceId]. Premium-gated.
+  Future<void> transfer(String deviceId, {bool play = true}) async {
+    await _ensureToken();
+    final resp = await _http.put(
+      Uri.parse('$_apiBase/me/player'),
+      headers: {
+        'Authorization': 'Bearer $_access',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({'device_ids': [deviceId], 'play': play}),
+    );
+    // 204 = transferred, 202 = deferred. Anything else is a real error.
+    if (resp.statusCode != 204 && resp.statusCode != 202) {
+      throw StateError('Spotify transfer failed: HTTP ${resp.statusCode} '
+          '${resp.body.length > 200 ? resp.body.substring(0, 200) : resp.body}');
+    }
+  }
+
+  /// Start [uri] (spotify:track:…) on [deviceId]. Premium-gated.
+  Future<void> playUri(String deviceId, String uri,
+      {int positionMs = 0}) async {
+    await _ensureToken();
+    final resp = await _http.put(
+      Uri.parse('$_apiBase/me/player/play?device_id=$deviceId'),
+      headers: {
+        'Authorization': 'Bearer $_access',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({'uris': [uri], 'position_ms': positionMs}),
+    );
+    if (resp.statusCode != 204) {
+      throw StateError('Spotify play failed: HTTP ${resp.statusCode} '
+          '${resp.body.length > 200 ? resp.body.substring(0, 200) : resp.body}');
+    }
+  }
+
+  /// Pause on the active device. Premium-gated.
+  Future<void> pause() async {
+    await _ensureToken();
+    final resp = await _http.put(
+      Uri.parse('$_apiBase/me/player/pause'),
+      headers: {'Authorization': 'Bearer $_access'},
+    );
+    if (resp.statusCode != 204 && resp.statusCode != 403) {
+      throw StateError('Spotify pause failed: HTTP ${resp.statusCode}');
+    }
+  }
+
+  /// Seek on the active device. Premium-gated.
+  Future<void> seek(int positionMs) async {
+    await _ensureToken();
+    final resp = await _http.put(
+      Uri.parse('$_apiBase/me/player/seek?position_ms=$positionMs'),
+      headers: {'Authorization': 'Bearer $_access'},
+    );
+    if (resp.statusCode != 204 && resp.statusCode != 403) {
+      throw StateError('Spotify seek failed: HTTP ${resp.statusCode}');
+    }
+  }
+
+  /// Current playback state (position, is_playing, device). Null when
+  /// nothing is active. Premium-gated.
+  Future<Map<String, dynamic>?> getPlaybackState() async {
+    await _ensureToken();
+    final resp = await _http.get(
+      Uri.parse('$_apiBase/me/player'),
+      headers: {'Authorization': 'Bearer $_access'},
+    );
+    if (resp.statusCode == 204 || resp.statusCode == 404) return null;
+    if (resp.statusCode != 200) {
+      throw StateError('Spotify state failed: HTTP ${resp.statusCode}');
+    }
+    return jsonDecode(resp.body) as Map<String, dynamic>;
+  }
+
   Future<List<SpotifyPlaylist>> getMyPlaylists() async {
     final out = <SpotifyPlaylist>[];
     String? url = '$_apiBase/me/playlists?limit=50';

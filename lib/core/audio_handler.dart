@@ -546,11 +546,76 @@ class UnissonAudioHandler extends BaseAudioHandler {
       }
     }
     if (gen == _loadGen) {
+      // YTM-specific auto-diagnosis: the phone diag showed IOS direct
+      // fetch works while proxy leg was never measured. When ytm fails
+      // to resolve AND the user is logged in, run a direct byte-fetch
+      // verdict so the banner carries real data instead of a guess.
+      if (order.contains('ytm') && entry.track.sources.containsKey('ytm')) {
+        unawaited(_diagnoseYtmInline(entry));
+      }
+      // Last-chance synchronous enrichment: freshly imported single-
+      // source tracks (e.g. Spotify import) have no playable source
+      // yet. Search the other providers NOW (not just background) and
+      // retry the ladder with whatever lands.
+      final spec2 = await _enrichAndRetry(entry, gen);
+      if (spec2 != null) return spec2;
       _errorSubject.add(attempts.isEmpty
           ? 'Could not play "${entry.track.title}" — track has no sources'
           : 'Could not play "${entry.track.title}" — ${attempts.join(' | ')}');
     }
     return null;
+  }
+
+  /// Synchronous enrichment for a track that just failed to resolve:
+  /// search every configured provider the track lacks, merge exact
+  /// matches, persist, and re-run the resolve ladder once.
+  Future<StreamSpec?> _enrichAndRetry(QueueEntry entry, int gen) async {
+    if (entry.track.sources.isEmpty) return null;
+    final key = entry.track.universalKey;
+    final found = <String, Track>{};
+    final query =
+        '${entry.track.title} ${entry.track.artists.join(' ')}'.trim();
+    for (final p in library.providers) {
+      if (gen != _loadGen) return null;
+      if (!p.isConfigured) continue;
+      if (entry.track.sources.containsKey(p.id)) continue;
+      try {
+        final results =
+            await p.search(query).timeout(const Duration(seconds: 12));
+        for (final t in results.tracks) {
+          if (_keyOf(t) == key) {
+            found[p.id] = t;
+            break;
+          }
+        }
+      } catch (_) {}
+    }
+    if (found.isEmpty) return null;
+    entry.track.sources.addAll(found);
+    _broadcastQueue();
+    storeFuture?.then(
+        (s) => s.enrichTrack(entry.track.universalKey, found));
+    return await _resolveWithFallback(entry, gen);
+  }
+
+  /// Inline YTM verdict on load failure: runs the provider's on-device
+  /// diagnostics and surfaces the first useful line in the error
+  /// banner, so failures carry data instead of "error 0".
+  Future<void> _diagnoseYtmInline(QueueEntry entry) async {
+    try {
+      final ytm = library.providers
+          .whereType<YtmProvider>()
+          .firstWhere((p) => p.isConfigured);
+      final lines = await ytm.diagnose()
+          .timeout(const Duration(seconds: 90));
+      final verdict = lines
+          .where((l) =>
+              l.contains('resolved itag') || l.contains('failed'))
+          .join(' || ');
+      if (verdict.isNotEmpty) {
+        _errorSubject.add('YTM diag: $verdict');
+      }
+    } catch (_) {}
   }
 
   void _onTrackCompleted() {

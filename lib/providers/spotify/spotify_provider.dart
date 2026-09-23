@@ -28,11 +28,17 @@ class SpotifyProvider implements MusicProvider {
 
   @override
   Future<StreamSpec> resolveStream(Track track, QualityPref pref) async {
-    // The official Web API exposes no stream URLs; librespot-style
-    // playback needs a premium account and a separate phase.
+    // Spotify ships no stream URLs (Web API). Playback of imported
+    // content happens by enriching the track with other sources at
+    // play time (see audio handler); native playback is a separate
+    // phase (Web Playback SDK, Premium).
     throw UnsupportedError(
-        'Spotify playback is not supported yet (import & search only)');
+        'Spotify has no direct streams — enrich from other sources');
   }
+
+  /// Devices currently registered for playback (Web Playback SDK
+  /// instances show up here once connected). Premium-gated.
+  Future<List<Map<String, dynamic>>> devices() => api.getDevices();
 
   Track _toTrack(SpotifyTrack t) => Track(
         providerId: id,
