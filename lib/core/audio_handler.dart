@@ -516,6 +516,14 @@ class UnissonAudioHandler extends BaseAudioHandler {
   /// Play [trackId] on the headless Spotify Connect device. Boots the
   /// WebView engine on first use; subsequent plays are instant.
   Future<bool> _startSpotifyPlayback(String trackId, int gen) async {
+    // Track ids from imports carry a 'spotify:' prefix (and may be full
+    // URIs). The Web API wants a bare id inside spotify:track:<id>.
+    var bare = trackId;
+    while (bare.startsWith('spotify:')) {
+      bare = bare.substring('spotify:'.length);
+    }
+    if (bare.startsWith('track/')) bare = bare.substring('track/'.length);
+    final uri = 'spotify:track:$bare';
     final sp = _spotify;
     if (sp == null) {
       needsSpotifyRelogin = true;
@@ -559,7 +567,7 @@ class UnissonAudioHandler extends BaseAudioHandler {
     }
     if (gen != _loadGen) return false; // superseded while booting
     try {
-      await sp.api.playUri(engine.deviceId!, 'spotify:track:$trackId');
+      await sp.api.playUri(engine.deviceId!, uri);
       _spotifyTrackId = trackId;
       _startSpotifyPoller();
       return true;
@@ -571,7 +579,7 @@ class UnissonAudioHandler extends BaseAudioHandler {
         final ok = await engine.reboot();
         if (ok && gen == _loadGen) {
           try {
-            await sp.api.playUri(engine.deviceId!, 'spotify:track:$trackId');
+            await sp.api.playUri(engine.deviceId!, uri);
             _spotifyTrackId = trackId;
             _startSpotifyPoller();
             return true;
