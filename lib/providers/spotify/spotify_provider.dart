@@ -35,6 +35,9 @@ class SpotifyProvider implements MusicProvider {
     return StreamSpec(
       uri: Uri.parse('spotify:track:${track.id}'),
       contentType: 'application/x-spotify-track',
+      // Web Playback SDK cap: AAC ~128 kbps (160 for accounts with
+      // 'Very high' quality set). No lossless tier exists in the SDK.
+      bitrate: 128,
       userAgent: 'Unisson/1.0',
     );
   }

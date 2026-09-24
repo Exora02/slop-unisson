@@ -461,6 +461,13 @@ class UnissonAudioHandler extends BaseAudioHandler {
 
     // ---- Spotify native path: Web Playback SDK device ----
     if (source == 'spotify') {
+      // Single-source tracks gain cross-provider matches lazily: the
+      // query is cheap, runs off the play path, and persists. Spotify
+      // now succeeds on its own, so failure-triggered enrichment never
+      // fires for these anymore.
+      if (entry.track.sources.length == 1) {
+        _enrichInBackground(entry);
+      }
       // Never let just_audio keep the audio focus while the WebView
       // device takes over — a running Qobuz/YTM stream blocks the
       // SDK's AudioContext from starting (silent switch).
