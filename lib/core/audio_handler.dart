@@ -461,8 +461,17 @@ class UnissonAudioHandler extends BaseAudioHandler {
 
     // ---- Spotify native path: Web Playback SDK device ----
     if (source == 'spotify') {
+      // Never let just_audio keep the audio focus while the WebView
+      // device takes over — a running Qobuz/YTM stream blocks the
+      // SDK's AudioContext from starting (silent switch).
+      try {
+        await _player.pause();
+      } catch (_) {}
       final ok = await _startSpotifyPlayback(track.id, gen);
-      if (ok) return;
+      if (ok) {
+        mediaItem.add(_toMediaItem(entry.track, track, spec));
+        return;
+      }
       // fall through to error path — _startSpotifyPlayback logged it
       _lastLoadFailed = true;
       return;
@@ -498,6 +507,26 @@ class UnissonAudioHandler extends BaseAudioHandler {
       if (p is SpotifyProvider && p.isConfigured) return p;
     }
     return null;
+  }
+
+  /// Tear down an active Web Playback SDK session: pause Spotify,
+  /// drop the poller, and broadcast a stopped state.
+  Future<void> _endSpotifySession() async {
+    _spotifyPoll?.cancel();
+    _spotifyPoll = null;
+    final id = _spotifyTrackId;
+    _spotifyTrackId = null;
+    if (id != null) {
+      final sp = _spotify;
+      if (sp != null) {
+        try {
+          await sp.api.pause();
+        } catch (_) {}
+      }
+    }
+    playbackState.add(playbackState.value.copyWith(
+      processingState: AudioProcessingState.idle,
+    ));
   }
 
   /// Drop the SDK device so the next Spotify play boots with the
@@ -701,6 +730,11 @@ class UnissonAudioHandler extends BaseAudioHandler {
         return;
       }
       if (gen != _loadGen) return;
+      // Leaving the Spotify Web-Playback path: stop the Connect
+      // session or it keeps playing under the new just_audio source.
+      if (_spotifyActive) {
+        await _endSpotifySession();
+      }
       await _player.setAudioSource(
         AudioSource.uri(uri),
         preload: true,
