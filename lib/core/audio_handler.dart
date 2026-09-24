@@ -567,6 +567,9 @@ class UnissonAudioHandler extends BaseAudioHandler {
     }
     if (gen != _loadGen) return false; // superseded while booting
     try {
+      // Commanding a non-active device 403s on some accounts
+      // ("Restriction violated"). Transfer first, then play.
+      await sp.api.transfer(engine.deviceId!, play: false);
       await sp.api.playUri(engine.deviceId!, uri);
       _spotifyTrackId = trackId;
       _startSpotifyPoller();
@@ -579,6 +582,7 @@ class UnissonAudioHandler extends BaseAudioHandler {
         final ok = await engine.reboot();
         if (ok && gen == _loadGen) {
           try {
+            await sp.api.transfer(engine.deviceId!, play: false);
             await sp.api.playUri(engine.deviceId!, uri);
             _spotifyTrackId = trackId;
             _startSpotifyPoller();

@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/widgets.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 /// Headless Spotify Connect device: a 1x1 WebView running Spotify's
 /// Web Playback SDK against the loopback-proxied host page (secure
@@ -83,6 +84,13 @@ class SpotifyEngine {
         await (c0.platform as dynamic).setOnPlatformPermissionRequest(
             (request) => request.grant());
       } catch (_) {}
+      if (c0.platform is AndroidWebViewController) {
+        // Hidden 1x1 WebView never receives a user gesture, but the
+        // SDK's AudioContext needs one to start on Android. Disable
+        // the requirement or playback stays silent forever.
+        await (c0.platform as AndroidWebViewController)
+            .setMediaPlaybackRequiresUserGesture(false);
+      }
       c = c0;
       controller = c;
     } else {
