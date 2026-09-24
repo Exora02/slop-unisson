@@ -44,8 +44,13 @@ class SpotifyEngine {
     var c = controller;
     if (c == null) {
       final port = await loadPort();
-      c = WebViewController()
+      // The Web Playback SDK refuses mobile user agents ("unsupported
+      // browser"). Pretend to be Chrome desktop.
+      const ua = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 '
+          '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+      final c0 = WebViewController()
         ..setJavaScriptMode(JavaScriptMode.unrestricted)
+        ..setUserAgent(ua)
         ..addJavaScriptChannel('spbridge', onMessageReceived: (m) {
           try {
             final j = jsonDecode(m.message) as Map<String, dynamic>;
@@ -63,12 +68,22 @@ class SpotifyEngine {
             } else if (type == 'auth_error') {
               onLog('spotify SDK auth error: ${j['message']}');
             } else if (type == 'player_error') {
-              accountError = true;
-              onLog('spotify SDK player error: ${j['message']}');
+              accountError = '${j['kind']}' == 'account';
+              onLog('spotify SDK player error (${j['kind']}): ${j['message']}');
             }
           } catch (_) {}
         })
         ..loadRequest(Uri.parse('http://127.0.0.1:$port/spotify-host'));
+      // Widevine/EME: the SDK requests protected media identifiers.
+      // Denying (the default) kills player init ("failed to initialize
+      // player"). The facade hides this API in webview_flutter 4.13,
+      // so call the platform interface directly. The host page only
+      // ever runs our own Spotify page — grant everything it asks.
+      try {
+        await (c0.platform as dynamic).setOnPlatformPermissionRequest(
+            (request) => request.grant());
+      } catch (_) {}
+      c = c0;
       controller = c;
     } else {
       // existing controller: reload the host page so the SDK restarts

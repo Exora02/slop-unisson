@@ -27,7 +27,7 @@ import 'ui/import_sheet.dart';
 import 'ui/library_screen.dart';
 import 'ui/mini_player.dart';
 
-const appBuildTag = 'v0.5.16-scopecam';
+const appBuildTag = 'v0.5.17-eme';
 
 /// Global handle to the audio handler, set when the service starts so
 /// the Spotify host widget can reach the engine notifier.

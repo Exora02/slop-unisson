@@ -242,10 +242,10 @@ window.onSpotifyWebPlaybackSDKReady = function () {
     bridge({type: 'auth_error', message: e.message});
   });
   player.addListener('initialization_error', function (e) {
-    bridge({type: 'player_error', message: e.message});
+    bridge({type: 'player_error', kind: 'init', message: e.message});
   });
   player.addListener('account_error', function (e) {
-    bridge({type: 'player_error', message: 'account: ' + e.message});
+    bridge({type: 'player_error', kind: 'account', message: e.message});
   });
   player.connect();
 };
