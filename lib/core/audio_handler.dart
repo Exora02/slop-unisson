@@ -458,6 +458,9 @@ class UnissonAudioHandler extends BaseAudioHandler {
       storeFuture?.then((s) => s.updateTrackMeta(entry.track.universalKey,
           artwork: spec.artwork, album: spec.album));
     }
+    // Recents belong to every play path, not just search taps —
+    // playlist/liked plays were never recorded.
+    storeFuture?.then((s) => s.addRecent(entry.track));
 
     // ---- Spotify native path: Web Playback SDK device ----
     if (source == 'spotify') {

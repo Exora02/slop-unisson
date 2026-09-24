@@ -37,7 +37,8 @@ class SpotifyProvider implements MusicProvider {
       contentType: 'application/x-spotify-track',
       // Web Playback SDK cap: AAC ~128 kbps (160 for accounts with
       // 'Very high' quality set). No lossless tier exists in the SDK.
-      bitrate: 128,
+      // Bitrate is in bits/sec like every other spec.
+      bitrate: 128000,
       userAgent: 'Unisson/1.0',
     );
   }
