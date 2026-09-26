@@ -579,7 +579,13 @@ class UnissonAudioHandler extends BaseAudioHandler {
         await proxy.start();
         return proxy.port;
       },
-      onLog: (l) => _errorSubject.add('spotify: $l'),
+      // Info-level SDK chatter must NOT enter the error stream —
+      // "device up" reconnects were overwriting the real YTM error
+      // in the banner. Errors still surface via the boot-failure
+      // branches below.
+      onLog: (l) {
+        if (l.contains('error')) _errorSubject.add('spotify: $l');
+      },
     );
     engineNotifier.value = engine;
     if (!engine.isReady && !await engine.ensureBooted()) {

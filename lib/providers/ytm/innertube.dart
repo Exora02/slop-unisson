@@ -281,6 +281,27 @@ class InnerTubeClient {
       lastAttemptTrace.add('${c.name}: stream URL failed validation');
       return null;
     }
+    // Byte-fetch validation: a minted URL can still be dead (PO-token
+    // era enforcement 403s the CDN fetch while the player API happily
+    // returns formats). One ranged GET settles it — if the CDN refuses
+    // bytes, this rung is useless and the fallback must fire.
+    try {
+      final probe = await _http.get(u!, headers: {
+        'User-Agent': c.userAgent,
+        'Range': 'bytes=0-1023',
+      }).timeout(const Duration(seconds: 8));
+      if (probe.statusCode != 206 && probe.statusCode != 200) {
+        lastAttemptTrace
+            .add('${c.name}: CDN refused bytes (HTTP ${probe.statusCode})');
+        return null;
+      }
+    } on TimeoutException {
+      lastAttemptTrace.add('${c.name}: CDN probe timed out');
+      return null;
+    } catch (e) {
+      lastAttemptTrace.add('${c.name}: CDN probe failed: $e');
+      return null;
+    }
 
     final mime = best['mimeType'] as String? ?? '';
     final codecMatch = RegExp('codecs="([^"]+)"').firstMatch(mime);
